@@ -54,6 +54,7 @@ public struct MigrationEngine: Sendable {
                 id: thread.id,
                 provider: thread.provider,
                 projectPath: thread.projectPath,
+                source: thread.source,
                 title: thread.title,
                 filePath: URL(fileURLWithPath: rolloutPath),
                 lastUpdatedAt: thread.updatedAt,

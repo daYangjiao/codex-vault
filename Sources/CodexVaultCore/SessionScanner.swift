@@ -75,6 +75,7 @@ public struct SessionScanner: Sendable {
             id: meta.id,
             provider: meta.modelProvider,
             projectPath: meta.cwd,
+            source: meta.source,
             title: firstUserMessage ?? fileURL.deletingPathExtension().lastPathComponent,
             filePath: fileURL,
             lastUpdatedAt: newestTimestamp ?? fallbackDate ?? meta.timestampDate,
@@ -145,6 +146,7 @@ private struct Payload: Decodable {
     let id: String?
     let timestamp: String?
     let cwd: String?
+    let source: String?
     let modelProvider: String?
     let type: String?
     let role: String?
@@ -154,6 +156,7 @@ private struct Payload: Decodable {
         case id
         case timestamp
         case cwd
+        case source
         case modelProvider = "model_provider"
         case type
         case role
@@ -164,7 +167,7 @@ private struct Payload: Decodable {
         guard let id else {
             return nil
         }
-        return SessionMetaPayload(id: id, timestamp: timestamp, cwd: cwd, modelProvider: modelProvider)
+        return SessionMetaPayload(id: id, timestamp: timestamp, cwd: cwd, source: source, modelProvider: modelProvider)
     }
 
     var firstInputText: String? {
@@ -181,6 +184,7 @@ private struct SessionMetaPayload {
     let id: String
     let timestamp: String?
     let cwd: String?
+    let source: String?
     let modelProvider: String?
 
     var timestampDate: Date? {

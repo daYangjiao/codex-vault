@@ -5,6 +5,8 @@ public struct Conversation: Identifiable, Hashable, Sendable {
     public var title: String
     public var sessionProvider: String?
     public var databaseProvider: String?
+    public var source: String?
+    public var threadSource: String?
     public var projectPath: String?
     public var sessionFilePath: URL?
     public var lastUpdatedAt: Date?
@@ -16,6 +18,8 @@ public struct Conversation: Identifiable, Hashable, Sendable {
         title: String,
         sessionProvider: String?,
         databaseProvider: String?,
+        source: String?,
+        threadSource: String?,
         projectPath: String?,
         sessionFilePath: URL?,
         lastUpdatedAt: Date?,
@@ -26,6 +30,8 @@ public struct Conversation: Identifiable, Hashable, Sendable {
         self.title = title
         self.sessionProvider = sessionProvider
         self.databaseProvider = databaseProvider
+        self.source = source
+        self.threadSource = threadSource
         self.projectPath = projectPath
         self.sessionFilePath = sessionFilePath
         self.lastUpdatedAt = lastUpdatedAt
@@ -124,6 +130,7 @@ public struct SessionRecord: Hashable, Sendable {
     public let id: String
     public let provider: String?
     public let projectPath: String?
+    public let source: String?
     public let title: String
     public let filePath: URL
     public let lastUpdatedAt: Date?
@@ -134,6 +141,8 @@ public struct DatabaseThread: Hashable, Sendable {
     public let id: String
     public let provider: String?
     public let projectPath: String?
+    public let source: String?
+    public let threadSource: String?
     public let title: String
     public let rolloutPath: String?
     public let updatedAt: Date?
