@@ -20,13 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = VaultStore()
         let contentView = MainView(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1220, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Codex Vault"
-        window.minSize = NSSize(width: 920, height: 560)
+        window.title = "Codex 对话管家"
+        window.minSize = NSSize(width: 980, height: 600)
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.makeKeyAndOrderFront(nil)
@@ -51,7 +51,7 @@ final class VaultStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var infoMessage: String?
     @Published var isScanning = false
-    @Published var scanMode = "Quick list"
+    @Published var scanMode = "列表模式"
 
     private let locator = CodexRootLocator()
     private let scanner = CodexVaultScanner()
@@ -83,7 +83,29 @@ final class VaultStore: ObservableObject {
     }
 
     var selectedConversation: Conversation? {
-        conversations.first { $0.id == selectedConversationID } ?? conversations.first
+        if let selectedConversationID,
+           let selected = conversations.first(where: { $0.id == selectedConversationID }) {
+            return selected
+        }
+        return conversations.first
+    }
+
+    var totalCount: Int {
+        result?.conversations.count ?? 0
+    }
+
+    var problemCount: Int {
+        result?.diagnostics.totalProblems ?? 0
+    }
+
+    func providerCount(_ provider: String) -> Int {
+        result?.conversations.filter { $0.effectiveProvider == provider }.count ?? 0
+    }
+
+    func setFilter(provider: String?, problemsOnly: Bool = false) {
+        selectedProvider = provider
+        showProblemsOnly = problemsOnly
+        keepSelectionVisible()
     }
 
     func refresh() {
@@ -94,98 +116,51 @@ final class VaultStore: ObservableObject {
         Task { await refreshDeep() }
     }
 
-    private func refreshQuick() async {
-        isScanning = true
-        scanMode = "Loading list"
-        errorMessage = nil
-        let root = self.root
-        let scanner = self.scanner
-        do {
-            try locator.validate(root: root)
-            let scan = try await Task.detached(priority: .userInitiated) {
-                try scanner.quickScan(root: root)
-            }.value
-            result = scan
-            scanMode = "Quick list"
-            if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
-                selectedConversationID = scan.conversations.first?.id
-            }
-        } catch {
-            result = nil
-            selectedConversationID = nil
-            errorMessage = error.localizedDescription
-        }
-        isScanning = false
-    }
-
-    private func refreshDeep() async {
-        isScanning = true
-        scanMode = "Syncing files"
-        errorMessage = nil
-        let root = self.root
-        let scanner = self.scanner
-        do {
-            try locator.validate(root: root)
-            let scan = try await Task.detached(priority: .userInitiated) {
-                try scanner.scan(root: root)
-            }.value
-            result = scan
-            scanMode = "Synced"
-            if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
-                selectedConversationID = scan.conversations.first?.id
-            }
-        } catch {
-            errorMessage = error.localizedDescription
-        }
-        isScanning = false
-    }
-
     func createBackup() {
         guard let result else {
-            errorMessage = "Scan Codex data before creating a backup."
+            errorMessage = "请先刷新列表，再创建备份。"
             return
         }
         do {
             let backup = try backupManager.createBackup(
                 root: root,
-                reason: "Manual backup",
+                reason: "手动备份",
                 conversationCount: result.conversations.count
             )
-            infoMessage = "Backup created: \(backup.backupDirectory.path)"
+            infoMessage = "备份完成：\(backup.backupDirectory.path)"
+            errorMessage = nil
         } catch {
-            errorMessage = error.localizedDescription
-        }
-    }
-
-    func migrateSelection(to targetProvider: String) {
-        let ids = selectedConversationIDsForAction()
-        do {
-            let report = try migrationEngine.migrate(
-                root: root,
-                conversationIDs: ids,
-                targetProvider: targetProvider
-            )
-            infoMessage = "Migrated \(report.migratedCount) conversation(s) to \(report.targetProvider). Backup: \(report.backup.backupDirectory.path)"
-            Task { await refreshQuick() }
-        } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = readableMessage(error)
         }
     }
 
     func restoreLatestBackup() {
         do {
             let backup = try migrationEngine.restoreLatestBackup(root: root)
-            infoMessage = "Restored backup: \(backup.backupDirectory.path)"
+            infoMessage = "已恢复最近备份：\(backup.backupDirectory.path)"
+            errorMessage = nil
             Task { await refreshQuick() }
         } catch {
-            errorMessage = error.localizedDescription
+            errorMessage = readableMessage(error)
         }
+    }
+
+    func migrateSelected(to targetProvider: String) {
+        let ids = selectedConversationIDsForAction()
+        performMigration(ids: ids, targetProvider: targetProvider, scopeName: "选中会话")
+    }
+
+    func migrateAll(from sourceProvider: String, to targetProvider: String) {
+        let ids = result?.conversations
+            .filter { $0.effectiveProvider == sourceProvider }
+            .map(\.id) ?? []
+        performMigration(ids: ids, targetProvider: targetProvider, scopeName: "全部\(ProviderText.name(sourceProvider))会话")
     }
 
     func chooseCodexRoot() {
         let panel = NSOpenPanel()
-        panel.title = "Choose Codex Data Directory"
-        panel.message = "Select the .codex directory to scan."
+        panel.title = "选择 Codex 数据目录"
+        panel.message = "请选择本机的 .codex 文件夹。"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
@@ -198,11 +173,131 @@ final class VaultStore: ObservableObject {
         }
     }
 
+    func dismissMessages() {
+        infoMessage = nil
+        errorMessage = nil
+    }
+
+    private func refreshQuick() async {
+        isScanning = true
+        scanMode = "读取列表"
+        errorMessage = nil
+        let root = self.root
+        let scanner = self.scanner
+        do {
+            try locator.validate(root: root)
+            let scan = try await Task.detached(priority: .userInitiated) {
+                try scanner.quickScan(root: root)
+            }.value
+            result = scan
+            scanMode = "列表模式"
+            keepSelection(in: scan)
+        } catch {
+            result = nil
+            selectedConversationID = nil
+            errorMessage = readableMessage(error)
+        }
+        isScanning = false
+    }
+
+    private func refreshDeep() async {
+        isScanning = true
+        scanMode = "同步校验"
+        errorMessage = nil
+        let root = self.root
+        let scanner = self.scanner
+        do {
+            try locator.validate(root: root)
+            let scan = try await Task.detached(priority: .userInitiated) {
+                try scanner.scan(root: root)
+            }.value
+            result = scan
+            scanMode = "校验完成"
+            keepSelection(in: scan)
+        } catch {
+            errorMessage = readableMessage(error)
+        }
+        isScanning = false
+    }
+
+    private func performMigration(ids: [String], targetProvider: String, scopeName: String) {
+        guard !ids.isEmpty else {
+            errorMessage = "没有可转换的会话。"
+            infoMessage = nil
+            return
+        }
+
+        isScanning = true
+        scanMode = "正在转换"
+        errorMessage = nil
+        infoMessage = nil
+
+        let root = self.root
+        let engine = self.migrationEngine
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try engine.migrate(
+                        root: root,
+                        conversationIDs: ids,
+                        targetProvider: targetProvider
+                    )
+                }.value
+                infoMessage = "\(scopeName)已转换到\(ProviderText.name(report.targetProvider))，共 \(report.migratedCount) 条。已自动备份。"
+                await refreshQuick()
+            } catch {
+                errorMessage = readableMessage(error)
+                scanMode = "列表模式"
+                isScanning = false
+            }
+        }
+    }
+
     private func selectedConversationIDsForAction() -> [String] {
-        if let selectedConversationID {
+        if let selectedConversationID,
+           conversations.contains(where: { $0.id == selectedConversationID }) {
             return [selectedConversationID]
         }
         return selectedConversation.map { [$0.id] } ?? []
+    }
+
+    private func keepSelection(in scan: ScanResult) {
+        if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
+            selectedConversationID = conversations.first?.id ?? scan.conversations.first?.id
+        }
+    }
+
+    private func keepSelectionVisible() {
+        if let selectedConversationID,
+           conversations.contains(where: { $0.id == selectedConversationID }) {
+            return
+        }
+        selectedConversationID = conversations.first?.id
+    }
+
+    private func readableMessage(_ error: Error) -> String {
+        if let vaultError = error as? CodexVaultError {
+            switch vaultError {
+            case .missingCodexRoot(let url):
+                return "没有找到 Codex 数据目录：\(url.path)"
+            case .unreadableFile(let url):
+                return "无法读取文件：\(url.path)"
+            case .sqliteOpenFailed(let message):
+                return "无法打开 Codex 数据库：\(message)"
+            case .sqlitePrepareFailed(let message):
+                return "无法查询 Codex 数据库：\(message)"
+            case .unsupportedDatabaseSchema:
+                return "当前 Codex 数据库结构暂不支持。"
+            case .codexIsRunning(let processes):
+                let details = processes.map { "\($0.id)：\($0.command)" }.joined(separator: "\n")
+                return "请先完全退出 Codex，再转换聊天记录。\n\(details)"
+            case .backupFailed(let message):
+                return "备份失败：\(message)"
+            case .migrationFailed(let message):
+                return "转换失败：\(message)"
+            }
+        }
+        return error.localizedDescription
     }
 }
 
@@ -210,201 +305,480 @@ struct MainView: View {
     @ObservedObject var store: VaultStore
 
     var body: some View {
-        NavigationSplitView {
-            SidebarView(store: store)
-                .navigationSplitViewColumnWidth(min: 210, ideal: 250, max: 320)
-        } content: {
-            ConversationListView(store: store)
-                .navigationSplitViewColumnWidth(min: 420, ideal: 540)
-        } detail: {
-            ConversationDetailView(conversation: store.selectedConversation, root: store.root)
-                .navigationSplitViewColumnWidth(min: 320, ideal: 390)
-        }
-        .toolbar {
-            ToolbarItemGroup {
-                Button {
-                    store.refresh()
-                } label: {
-                    Label("Refresh", systemImage: "arrow.clockwise")
-                }
-                .help("Refresh the fast SQLite conversation list")
+        VStack(spacing: 0) {
+            HeaderView(store: store)
 
-                Button {
-                    store.syncDeep()
-                } label: {
-                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
-                }
-                .help("Scan session files for deeper provider diagnostics")
-
-                Button {
-                    store.chooseCodexRoot()
-                } label: {
-                    Label("Choose Folder", systemImage: "folder")
-                }
-                .help("Choose Codex data directory")
-
-                Button {
-                    confirmBackup(store: store)
-                } label: {
-                    Label("Backup", systemImage: "externaldrive")
-                }
-                .help("Create a backup of local Codex history")
-
-                Button {
-                    promptMigration(store: store)
-                } label: {
-                    Label("Migrate", systemImage: "arrow.left.arrow.right")
-                }
-                .help("Migrate the selected conversation to another provider")
-
-                Button {
-                    confirmRestore(store: store)
-                } label: {
-                    Label("Restore", systemImage: "clock.arrow.circlepath")
-                }
-                .help("Restore the latest Codex Vault backup")
+            if store.errorMessage != nil || store.infoMessage != nil {
+                MessageBanner(store: store)
             }
+
+            Divider()
+
+            HStack(spacing: 0) {
+                FilterPanel(store: store)
+                    .frame(width: 218)
+
+                Divider()
+
+                VStack(spacing: 0) {
+                    ConversionPanel(store: store)
+                    Divider()
+                    ConversationListView(store: store)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                Divider()
+
+                InspectorPanel(conversation: store.selectedConversation, root: store.root)
+                    .frame(width: 340)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private func confirmBackup(store: VaultStore) {
-        let alert = NSAlert()
-        alert.messageText = "Create a Codex history backup?"
-        alert.informativeText = "The backup is stored in ~/Library/Application Support/Codex Vault/Backups."
-        alert.addButton(withTitle: "Create Backup")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
+    private func confirmBackup() {
+        confirm(
+            title: "创建聊天记录备份？",
+            message: "备份会保存到应用支持目录，转换前也会自动备份。",
+            confirmTitle: "创建备份"
+        ) {
             store.createBackup()
-            showStoreMessage(store)
         }
     }
 
-    private func promptMigration(store: VaultStore) {
-        guard store.selectedConversation != nil else {
-            showAlert(title: "No conversation selected", message: "Select a conversation before migrating.")
-            return
-        }
-
-        let alert = NSAlert()
-        alert.messageText = "Migrate selected conversation"
-        alert.informativeText = "Enter the target provider, for example openai or custom. Codex must be fully closed before migration."
-        alert.addButton(withTitle: "Migrate")
-        alert.addButton(withTitle: "Cancel")
-
-        let field = NSTextField(frame: NSRect(x: 0, y: 0, width: 260, height: 24))
-        field.placeholderString = "custom"
-        field.stringValue = store.selectedConversation?.sessionProvider == "openai" ? "custom" : "openai"
-        alert.accessoryView = field
-
-        if alert.runModal() == .alertFirstButtonReturn {
-            store.migrateSelection(to: field.stringValue)
-            showStoreMessage(store)
-        }
-    }
-
-    private func confirmRestore(store: VaultStore) {
-        let alert = NSAlert()
-        alert.messageText = "Restore latest backup?"
-        alert.informativeText = "This replaces the current local Codex history files with the latest Codex Vault backup. Codex must be fully closed."
-        alert.addButton(withTitle: "Restore Latest")
-        alert.addButton(withTitle: "Cancel")
-        if alert.runModal() == .alertFirstButtonReturn {
+    private func confirmRestore() {
+        confirm(
+            title: "恢复最近一次备份？",
+            message: "这会替换当前本机 Codex 聊天记录。操作前请完全退出 Codex。",
+            confirmTitle: "恢复备份"
+        ) {
             store.restoreLatestBackup()
-            showStoreMessage(store)
         }
     }
 
-    private func showStoreMessage(_ store: VaultStore) {
-        if let error = store.errorMessage {
-            showAlert(title: "Codex Vault", message: error)
-        } else if let info = store.infoMessage {
-            showAlert(title: "Codex Vault", message: info)
-        }
-    }
-
-    private func showAlert(title: String, message: String) {
+    private func confirm(title: String, message: String, confirmTitle: String, action: () -> Void) {
         let alert = NSAlert()
         alert.messageText = title
         alert.informativeText = message
-        alert.addButton(withTitle: "OK")
-        alert.runModal()
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            action()
+        }
     }
 }
 
-struct SidebarView: View {
+struct HeaderView: View {
     @ObservedObject var store: VaultStore
 
     var body: some View {
-        List(selection: sidebarSelection) {
-            Section("Library") {
-                Label("All Conversations", systemImage: "tray.full")
-                    .tag(SidebarSelection.all)
-                Label("Problems", systemImage: "exclamationmark.triangle")
-                    .tag(SidebarSelection.problems)
+        HStack(spacing: 14) {
+            AppMark()
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Codex 对话管家")
+                    .font(.system(size: 18, weight: .semibold))
+                Text("Codex 聊天记录转换")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
 
-            if let result = store.result {
-                Section("Providers") {
-                    ForEach(result.providerSummaries) { provider in
-                        HStack {
-                            Label(provider.id, systemImage: "shippingbox")
-                            Spacer()
-                            Text("\(provider.conversationCount)")
-                                .foregroundStyle(.secondary)
-                        }
-                        .tag(SidebarSelection.provider(provider.id))
-                    }
+            Spacer()
+
+            HeaderButton(title: "刷新列表", icon: "arrow.clockwise") {
+                store.refresh()
+            }
+            HeaderButton(title: "同步校验", icon: "arrow.triangle.2.circlepath") {
+                store.syncDeep()
+            }
+            HeaderButton(title: "选择目录", icon: "folder") {
+                store.chooseCodexRoot()
+            }
+            HeaderButton(title: "备份", icon: "externaldrive") {
+                confirm(
+                    title: "创建聊天记录备份？",
+                    message: "备份会保存到应用支持目录，转换前也会自动备份。",
+                    confirmTitle: "创建备份"
+                ) {
+                    store.createBackup()
+                }
+            }
+            HeaderButton(title: "恢复", icon: "clock.arrow.circlepath") {
+                confirm(
+                    title: "恢复最近一次备份？",
+                    message: "这会替换当前本机 Codex 聊天记录。操作前请完全退出 Codex。",
+                    confirmTitle: "恢复备份"
+                ) {
+                    store.restoreLatestBackup()
                 }
             }
         }
-        .safeAreaInset(edge: .bottom) {
-            VStack(alignment: .leading, spacing: 6) {
-                Text(store.root.path)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(2)
-                if let result = store.result {
-                    Text("\(result.conversations.count) conversations")
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                }
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(.bar)
-        }
-        .navigationTitle("Codex Vault")
+        .padding(.horizontal, 18)
+        .frame(height: 66)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 
-    private var sidebarSelection: Binding<SidebarSelection?> {
-        Binding {
-            if store.showProblemsOnly {
-                return .problems
-            }
-            if let provider = store.selectedProvider {
-                return .provider(provider)
-            }
-            return .all
-        } set: { selection in
-            switch selection {
-            case .all, .none:
-                store.selectedProvider = nil
-                store.showProblemsOnly = false
-            case .problems:
-                store.selectedProvider = nil
-                store.showProblemsOnly = true
-            case .provider(let provider):
-                store.selectedProvider = provider
-                store.showProblemsOnly = false
-            }
+    private func confirm(title: String, message: String, confirmTitle: String, action: () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            action()
         }
     }
 }
 
-enum SidebarSelection: Hashable {
-    case all
-    case problems
-    case provider(String)
+struct AppMark: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 10)
+                .fill(Color.white)
+                .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
+            Image(systemName: "bubble.left.and.text.bubble.right")
+                .font(.system(size: 21, weight: .medium))
+                .foregroundStyle(.black.opacity(0.78))
+        }
+        .frame(width: 40, height: 40)
+    }
+}
+
+struct HeaderButton: View {
+    let title: String
+    let icon: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            Label(title, systemImage: icon)
+                .labelStyle(.titleAndIcon)
+                .font(.system(size: 13, weight: .medium))
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
+    }
+}
+
+struct MessageBanner: View {
+    @ObservedObject var store: VaultStore
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: store.errorMessage == nil ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .foregroundStyle(store.errorMessage == nil ? .green : .orange)
+            Text(store.errorMessage ?? store.infoMessage ?? "")
+                .font(.callout)
+                .lineLimit(2)
+            Spacer()
+            Button {
+                store.dismissMessages()
+            } label: {
+                Image(systemName: "xmark")
+            }
+            .buttonStyle(.plain)
+        }
+        .padding(.horizontal, 18)
+        .padding(.vertical, 9)
+        .background(store.errorMessage == nil ? Color.green.opacity(0.08) : Color.orange.opacity(0.10))
+    }
+}
+
+struct FilterPanel: View {
+    @ObservedObject var store: VaultStore
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("会话范围")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+
+                FilterRow(
+                    title: "全部会话",
+                    icon: "tray.full",
+                    count: store.totalCount,
+                    selected: store.selectedProvider == nil && !store.showProblemsOnly
+                ) {
+                    store.setFilter(provider: nil)
+                }
+
+                FilterRow(
+                    title: "API 会话",
+                    icon: "network",
+                    count: store.providerCount("custom"),
+                    selected: store.selectedProvider == "custom" && !store.showProblemsOnly
+                ) {
+                    store.setFilter(provider: "custom")
+                }
+
+                FilterRow(
+                    title: "官方会话",
+                    icon: "checkmark.seal",
+                    count: store.providerCount("openai"),
+                    selected: store.selectedProvider == "openai" && !store.showProblemsOnly
+                ) {
+                    store.setFilter(provider: "openai")
+                }
+
+                FilterRow(
+                    title: "异常会话",
+                    icon: "exclamationmark.triangle",
+                    count: store.problemCount,
+                    selected: store.showProblemsOnly
+                ) {
+                    store.setFilter(provider: nil, problemsOnly: true)
+                }
+            }
+
+            Divider()
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("当前目录")
+                    .font(.caption)
+                    .fontWeight(.semibold)
+                    .foregroundStyle(.secondary)
+                Text(store.root.path)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(4)
+                    .textSelection(.enabled)
+            }
+
+            Spacer()
+
+            VStack(alignment: .leading, spacing: 5) {
+                Text(store.scanMode)
+                    .font(.caption)
+                    .fontWeight(.medium)
+                HStack(spacing: 6) {
+                    if store.isScanning {
+                        ProgressView()
+                            .scaleEffect(0.55)
+                            .frame(width: 14, height: 14)
+                    }
+                    Text(store.result?.databaseAvailable == true ? "读取 SQLite 列表" : "等待数据")
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                }
+            }
+        }
+        .padding(16)
+        .frame(maxHeight: .infinity, alignment: .top)
+        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+    }
+}
+
+struct FilterRow: View {
+    let title: String
+    let icon: String
+    let count: Int
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: icon)
+                    .font(.system(size: 14, weight: .medium))
+                    .frame(width: 18)
+                Text(title)
+                    .font(.system(size: 14, weight: .medium))
+                Spacer()
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 34)
+            .background(selected ? Color.black.opacity(0.08) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+struct ConversionPanel: View {
+    @ObservedObject var store: VaultStore
+
+    var selectedProvider: String? {
+        store.selectedConversation?.effectiveProvider
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(alignment: .firstTextBaseline) {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("一键转换")
+                        .font(.system(size: 20, weight: .semibold))
+                    Text("把 Codex 聊天记录在 API 和官方之间切换。默认只读取列表，不展开聊天内容。")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+
+                Spacer()
+
+                VStack(alignment: .trailing, spacing: 3) {
+                    Text("选中会话")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                    Text(selectedProvider.map(ProviderText.name) ?? "未选择")
+                        .font(.callout)
+                        .fontWeight(.semibold)
+                }
+            }
+
+            HStack(spacing: 10) {
+                DirectionButton(
+                    title: "API → 官方",
+                    subtitle: "选中会话转到官方",
+                    icon: "arrow.right.circle.fill",
+                    prominent: true,
+                    disabled: store.selectedConversation == nil || selectedProvider == "openai"
+                ) {
+                    confirmMigration(
+                        title: "把选中会话转换到官方？",
+                        message: "会自动备份本机聊天记录。操作前请完全退出 Codex。",
+                        confirmTitle: "转换到官方"
+                    ) {
+                        store.migrateSelected(to: "openai")
+                    }
+                }
+
+                DirectionButton(
+                    title: "官方 → API",
+                    subtitle: "选中会话转到 API",
+                    icon: "arrow.left.circle",
+                    prominent: false,
+                    disabled: store.selectedConversation == nil || selectedProvider == "custom"
+                ) {
+                    confirmMigration(
+                        title: "把选中会话转换到 API？",
+                        message: "会自动备份本机聊天记录。操作前请完全退出 Codex。",
+                        confirmTitle: "转换到 API"
+                    ) {
+                        store.migrateSelected(to: "custom")
+                    }
+                }
+
+                VStack(spacing: 8) {
+                    BatchButton(
+                        title: "全部 API → 官方",
+                        count: store.providerCount("custom"),
+                        disabled: store.providerCount("custom") == 0
+                    ) {
+                        confirmMigration(
+                            title: "把全部 API 会话转换到官方？",
+                            message: "共 \(store.providerCount("custom")) 条。会自动备份。操作前请完全退出 Codex。",
+                            confirmTitle: "全部转官方"
+                        ) {
+                            store.migrateAll(from: "custom", to: "openai")
+                        }
+                    }
+
+                    BatchButton(
+                        title: "全部官方 → API",
+                        count: store.providerCount("openai"),
+                        disabled: store.providerCount("openai") == 0
+                    ) {
+                        confirmMigration(
+                            title: "把全部官方会话转换到 API？",
+                            message: "共 \(store.providerCount("openai")) 条。会自动备份。操作前请完全退出 Codex。",
+                            confirmTitle: "全部转 API"
+                        ) {
+                            store.migrateAll(from: "openai", to: "custom")
+                        }
+                    }
+                }
+                .frame(width: 190)
+            }
+        }
+        .padding(16)
+        .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func confirmMigration(title: String, message: String, confirmTitle: String, action: () -> Void) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = message
+        alert.addButton(withTitle: confirmTitle)
+        alert.addButton(withTitle: "取消")
+        if alert.runModal() == .alertFirstButtonReturn {
+            action()
+        }
+    }
+}
+
+struct DirectionButton: View {
+    let title: String
+    let subtitle: String
+    let icon: String
+    let prominent: Bool
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 22, weight: .semibold))
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(title)
+                        .font(.system(size: 18, weight: .semibold))
+                    Text(subtitle)
+                        .font(.caption)
+                        .foregroundStyle(prominent ? Color.white.opacity(0.72) : Color.secondary)
+                }
+                Spacer()
+            }
+            .padding(.horizontal, 14)
+            .frame(height: 68)
+            .background(prominent ? Color.black : Color(nsColor: .controlBackgroundColor))
+            .foregroundStyle(prominent ? Color.white : Color.primary)
+            .overlay(
+                RoundedRectangle(cornerRadius: 10)
+                    .stroke(prominent ? Color.clear : Color.black.opacity(0.10), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 10))
+            .opacity(disabled ? 0.38 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
+}
+
+struct BatchButton: View {
+    let title: String
+    let count: Int
+    let disabled: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack {
+                Text(title)
+                    .font(.system(size: 13, weight: .medium))
+                    .lineLimit(1)
+                Spacer()
+                Text("\(count)")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            .padding(.horizontal, 11)
+            .frame(height: 30)
+            .background(Color(nsColor: .controlBackgroundColor))
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .opacity(disabled ? 0.38 : 1)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+    }
 }
 
 struct ConversationListView: View {
@@ -412,17 +786,17 @@ struct ConversationListView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            SearchHeaderView(store: store)
+            ListHeaderView(store: store)
 
             if let error = store.errorMessage {
-                ContentUnavailableView("Cannot Scan Codex Data", systemImage: "exclamationmark.triangle", description: Text(error))
+                ContentUnavailableView("无法读取会话列表", systemImage: "exclamationmark.triangle", description: Text(error))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if store.conversations.isEmpty {
-                ContentUnavailableView("No Conversations", systemImage: "tray", description: Text("No conversations matched the current filters."))
+                ContentUnavailableView("没有匹配的会话", systemImage: "tray", description: Text("请调整搜索或范围。"))
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 Table(store.conversations, selection: $store.selectedConversationID) {
-                    TableColumn("Title") { conversation in
+                    TableColumn("会话") { conversation in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(conversation.title)
                                 .lineLimit(1)
@@ -432,73 +806,55 @@ struct ConversationListView: View {
                                 .lineLimit(1)
                         }
                     }
-                    .width(min: 210, ideal: 260)
+                    .width(min: 220, ideal: 310)
 
-                    TableColumn("Provider") { conversation in
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text(conversation.sessionProvider ?? conversation.databaseProvider ?? "Unknown")
-                            if conversation.sessionProvider != conversation.databaseProvider,
-                               conversation.sessionProvider != nil,
-                               conversation.databaseProvider != nil {
-                                Text("DB: \(conversation.databaseProvider ?? "")")
-                                    .font(.caption2)
-                                    .foregroundStyle(.orange)
-                            }
-                        }
+                    TableColumn("归属") { conversation in
+                        ProviderPill(provider: conversation.effectiveProvider)
                     }
-                    .width(min: 100, ideal: 120)
+                    .width(min: 82, ideal: 96)
 
-                    TableColumn("Project") { conversation in
-                        Text(conversation.projectPath ?? "Unknown")
+                    TableColumn("项目") { conversation in
+                        Text(conversation.projectPath ?? "未知")
                             .lineLimit(1)
+                            .foregroundStyle(.secondary)
                     }
-                    .width(min: 160, ideal: 220)
+                    .width(min: 170, ideal: 240)
 
-                    TableColumn("Status") { conversation in
+                    TableColumn("状态") { conversation in
                         StatusBadge(status: conversation.status)
                     }
-                    .width(min: 110, ideal: 140)
+                    .width(min: 96, ideal: 116)
                 }
             }
         }
-        .navigationTitle("Conversations")
     }
 }
 
-struct SearchHeaderView: View {
+struct ListHeaderView: View {
     @ObservedObject var store: VaultStore
 
     var body: some View {
         VStack(spacing: 10) {
-            HStack {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(.secondary)
-                TextField("Search title, session ID, or project path", text: $store.searchText)
-                    .textFieldStyle(.plain)
-            }
-            .padding(8)
-            .background(Color(nsColor: .controlBackgroundColor))
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-
-            if let result = store.result {
-                HStack(spacing: 16) {
-                    MetricView(title: "Total", value: "\(result.conversations.count)")
-                    MetricView(title: "Providers", value: "\(result.providerSummaries.count)")
-                    MetricView(title: "Problems", value: "\(result.diagnostics.totalProblems)")
-                    Spacer()
-                    if store.isScanning {
-                        ProgressView()
-                            .scaleEffect(0.6)
-                            .frame(width: 18, height: 18)
-                    }
-                    Text("\(store.scanMode) · \(result.databaseAvailable ? "SQLite" : "Files")")
-                        .font(.caption)
-                        .foregroundStyle(result.databaseAvailable ? Color.secondary : Color.orange)
+            HStack(spacing: 10) {
+                HStack {
+                    Image(systemName: "magnifyingglass")
+                        .foregroundStyle(.secondary)
+                    TextField("搜索标题、会话 ID 或项目路径", text: $store.searchText)
+                        .textFieldStyle(.plain)
                 }
+                .padding(8)
+                .background(Color(nsColor: .controlBackgroundColor))
+                .clipShape(RoundedRectangle(cornerRadius: 8))
+
+                MetricView(title: "总数", value: "\(store.totalCount)")
+                MetricView(title: "API", value: "\(store.providerCount("custom"))")
+                MetricView(title: "官方", value: "\(store.providerCount("openai"))")
+                MetricView(title: "异常", value: "\(store.problemCount)")
             }
         }
-        .padding(14)
-        .background(.bar)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color(nsColor: .windowBackgroundColor))
     }
 }
 
@@ -507,17 +863,18 @@ struct MetricView: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
             Text(value)
-                .font(.headline)
+                .font(.system(size: 16, weight: .semibold))
             Text(title)
-                .font(.caption)
+                .font(.caption2)
                 .foregroundStyle(.secondary)
         }
+        .frame(width: 48, alignment: .leading)
     }
 }
 
-struct ConversationDetailView: View {
+struct InspectorPanel: View {
     let conversation: Conversation?
     let root: URL
 
@@ -526,63 +883,58 @@ struct ConversationDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("Session")
-                            .font(.title2)
-                            .fontWeight(.semibold)
+                        Text("会话信息")
+                            .font(.system(size: 20, weight: .semibold))
                         HStack {
                             StatusBadge(status: conversation.status)
+                            ProviderPill(provider: conversation.effectiveProvider)
                             Text(shortID(conversation.id))
                                 .font(.system(.caption, design: .monospaced))
                                 .foregroundStyle(.secondary)
                         }
                     }
 
-                    DetailSection("Preview") {
-                        Text(conversation.title)
-                            .font(.body)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(3)
-                            .textSelection(.enabled)
+                    DetailSection("归属") {
+                        DetailRow("当前归属", ProviderText.name(conversation.effectiveProvider))
+                        DetailRow("数据库归属", ProviderText.name(conversation.databaseProvider))
+                        DetailRow("文件归属", ProviderText.name(conversation.sessionProvider))
                     }
 
-                    DetailSection("Identity") {
-                        DetailRow("Session ID", conversation.id, copyable: true)
-                        DetailRow("Project", conversation.projectPath ?? "Unknown")
-                        DetailRow("Archived", conversation.isArchived ? "Yes" : "No")
+                    DetailSection("标识") {
+                        DetailRow("会话 ID", conversation.id, copyable: true)
+                        DetailRow("项目路径", conversation.projectPath ?? "未知")
+                        DetailRow("归档状态", conversation.isArchived ? "已归档" : "未归档")
                     }
 
-                    DetailSection("Provider") {
-                        DetailRow("Session file", conversation.sessionProvider ?? "Missing")
-                        DetailRow("Database", conversation.databaseProvider ?? "Missing")
+                    DetailSection("文件") {
+                        DetailRow("Codex 目录", root.path)
+                        DetailRow("记录文件", conversation.sessionFilePath?.path ?? "未找到")
                     }
 
-                    DetailSection("Files") {
-                        DetailRow("Codex root", root.path)
-                        DetailRow("Session file", conversation.sessionFilePath?.path ?? "Missing")
-                    }
-
-                    DetailSection("Actions") {
+                    DetailSection("操作") {
                         HStack {
                             Button {
                                 copy(conversation.id)
                             } label: {
-                                Label("Copy ID", systemImage: "doc.on.doc")
+                                Label("复制 ID", systemImage: "doc.on.doc")
                             }
 
                             Button {
                                 reveal(conversation.sessionFilePath ?? root)
                             } label: {
-                                Label("Reveal", systemImage: "finder")
+                                Label("在访达中显示", systemImage: "finder")
                             }
                             .disabled(conversation.sessionFilePath == nil)
                         }
                     }
                 }
-                .padding(20)
+                .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
+            .background(Color(nsColor: .windowBackgroundColor))
         } else {
-            ContentUnavailableView("No Selection", systemImage: "sidebar.right", description: Text("Select a conversation to inspect it."))
+            ContentUnavailableView("未选择会话", systemImage: "sidebar.right", description: Text("从列表中选择一条会话。"))
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
     }
 
@@ -642,11 +994,48 @@ struct DetailRow: View {
     }
 }
 
+struct ProviderPill: View {
+    let provider: String?
+
+    var body: some View {
+        Text(ProviderText.name(provider))
+            .font(.caption)
+            .fontWeight(.medium)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(background)
+            .foregroundStyle(foreground)
+            .clipShape(Capsule())
+    }
+
+    private var background: Color {
+        switch provider {
+        case "openai":
+            return .black.opacity(0.08)
+        case "custom":
+            return .blue.opacity(0.12)
+        default:
+            return .gray.opacity(0.15)
+        }
+    }
+
+    private var foreground: Color {
+        switch provider {
+        case "openai":
+            return .primary
+        case "custom":
+            return .blue
+        default:
+            return .secondary
+        }
+    }
+}
+
 struct StatusBadge: View {
     let status: ConversationStatus
 
     var body: some View {
-        Text(status.displayName)
+        Text(status.chineseName)
             .font(.caption)
             .fontWeight(.medium)
             .padding(.horizontal, 8)
@@ -679,6 +1068,46 @@ struct StatusBadge: View {
             return .orange
         case .missingDatabaseRow, .missingSessionFile, .unreadableSessionFile:
             return .red
+        }
+    }
+}
+
+enum ProviderText {
+    static func name(_ provider: String?) -> String {
+        switch provider {
+        case "openai":
+            return "官方"
+        case "custom":
+            return "API"
+        case .some(let provider):
+            return provider
+        case .none:
+            return "未知"
+        }
+    }
+}
+
+extension Conversation {
+    var effectiveProvider: String? {
+        sessionProvider ?? databaseProvider
+    }
+}
+
+extension ConversationStatus {
+    var chineseName: String {
+        switch self {
+        case .ok:
+            return "正常"
+        case .providerMismatch:
+            return "归属不一致"
+        case .missingDatabaseRow:
+            return "缺少数据库"
+        case .missingSessionFile:
+            return "缺少文件"
+        case .unreadableSessionFile:
+            return "无法读取"
+        case .archived:
+            return "已归档"
         }
     }
 }

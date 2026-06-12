@@ -1,32 +1,41 @@
-# Codex Vault macOS MVP Product Design
+# Codex 对话管家 macOS MVP
 
-**Product name:** Codex Vault  
-**Chinese name:** Codex 对话库  
-**Platform:** macOS  
-**Form factor:** Lightweight native SwiftUI app  
-**Goal:** Let users view, diagnose, back up, restore, and migrate local Codex conversations across providers with a simple graphical interface.
+**产品名：** Codex 对话管家
+**平台：** macOS
+**形式：** 轻量原生 SwiftUI 应用
+**定位：** Codex 聊天记录转换和基础管理工具。
 
-## MVP Scope
+## 核心目标
 
-Included in the first shippable build:
+用户打开应用后，第一眼就能完成两件事：
 
-- Auto-detect the local Codex data directory.
-- Scan local Codex session files.
-- Read Codex `state_5.sqlite`.
-- Show all conversations across providers.
-- Filter conversations by provider, project path, and diagnostic status.
-- Detect inconsistent provider metadata between session files and SQLite.
-- Create local backups.
-- Migrate selected conversations to another provider.
-- Restore the latest local backup.
+- `API → 官方`
+- `官方 → API`
 
-Deferred until after the first packaged build:
+会话内容不作为主功能展示。默认只读取列表和状态，避免用户本机会话很多时卡顿。
 
-- Batch multi-select migration.
-- Fine-grained backup picker.
-- SQLite repair wizard.
-- DMG signing and notarization.
+## 当前范围
 
-## Safety Rule
+- 自动识别本机 Codex 数据目录。
+- 快速读取 `state_5.sqlite` 会话列表。
+- 固定中文三栏界面，避免系统侧栏隐藏/显示导致顶部布局跳动。
+- 按全部、API、官方、异常筛选会话。
+- 支持选中会话转换。
+- 支持全部 API 会话转官方。
+- 支持全部官方会话转 API。
+- 需要时同步校验 session JSONL 文件。
+- 转换前自动备份。
+- Codex 或 `codex app-server` 运行中拒绝写入。
+- 恢复最近一次本地备份。
 
-Codex Vault must never write to a real `.codex` directory unless it has first created a backup and verified Codex is fully closed.
+## 暂缓
+
+- 完整聊天内容浏览。
+- 多选表格批量转换。
+- 备份历史选择器。
+- SQLite 修复向导。
+- 签名和 notarization。
+
+## 安全规则
+
+任何写入真实 `.codex` 数据前，必须先创建备份，并确认 Codex 已完全退出。`state_5.sqlite` 不是唯一事实来源，转换必须同步更新 session JSONL 的 `session_meta.model_provider`。

@@ -3,7 +3,7 @@ set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 DIST_DIR="$ROOT_DIR/dist"
-APP_NAME="Codex Vault"
+APP_NAME="Codex 对话管家"
 WORK_DIR="$(mktemp -d /tmp/codex-vault-package.XXXXXX)"
 STAGING_DIR="$WORK_DIR/staging"
 BUILD_APP_BUNDLE="$STAGING_DIR/$APP_NAME.app"
@@ -40,9 +40,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
-  <string>en</string>
+  <string>zh_CN</string>
   <key>CFBundleDisplayName</key>
-  <string>Codex Vault</string>
+  <string>Codex 对话管家</string>
   <key>CFBundleExecutable</key>
   <string>CodexVault</string>
   <key>CFBundleIconFile</key>
@@ -52,27 +52,27 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Codex Vault</string>
+  <string>Codex 对话管家</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.0</string>
+  <string>0.1.1</string>
   <key>CFBundleVersion</key>
-  <string>1</string>
+  <string>2</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSHumanReadableCopyright</key>
-  <string>Copyright © 2026 Codex Vault contributors.</string>
+  <string>Copyright © 2026 Codex 对话管家 contributors.</string>
 </dict>
 </plist>
 PLIST
 
 cat > "$RESOURCES_DIR/README.txt" <<'TEXT'
-Codex Vault is a read-only local Codex conversation manager.
+Codex 对话管家是一个本机 Codex 聊天记录转换工具。
 
-This build scans ~/.codex session files and state_5.sqlite, then shows conversations across provider groups.
+它默认只读取 ~/.codex/state_5.sqlite 会话列表，需要时再同步校验 session 文件。
 TEXT
 
 if command -v xattr >/dev/null 2>&1; then
@@ -84,7 +84,7 @@ if command -v codesign >/dev/null 2>&1; then
 fi
 
 hdiutil create \
-  -volname "Codex Vault" \
+  -volname "Codex 对话管家" \
   -srcfolder "$STAGING_DIR" \
   -ov \
   -format UDZO \

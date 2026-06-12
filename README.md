@@ -1,46 +1,46 @@
-# Codex Vault
+# Codex 对话管家
 
-Codex Vault is a lightweight macOS conversation manager for local Codex Desktop history.
+一个轻量的 macOS 图形化工具，用来管理和转换本机 Codex 聊天记录。
 
-It scans local Codex session files and `state_5.sqlite`, then shows conversations across provider groups such as `openai` and `custom`. The first build is intentionally read-first: it focuses on visibility and diagnostics before enabling destructive migration flows.
+核心目标很简单：把 Codex 会话在 `API/custom` 和 `官方/openai` 之间一键转换。应用默认只读取 `state_5.sqlite` 里的会话列表，不展开完整聊天内容，避免会话很多时卡顿。
 
-## Current Features
+## 当前功能
 
-- Native macOS SwiftUI app.
-- Auto-detects `~/.codex`.
-- Opens with a fast SQLite-only conversation list.
-- Shows provider, project path, update time, and diagnostics status.
-- Runs deeper session-file sync only when requested.
-- Detects provider mismatches between session JSONL metadata and SQLite after sync.
-- Creates local backups.
-- Migrates the selected conversation to another provider after Codex is closed.
-- Restores the latest Codex Vault backup.
-- Includes tested core scanning and migration logic.
-- Ships as a manually assembled `.app` bundle and `.dmg`.
+- 原生 macOS SwiftUI 应用，可直接双击打开。
+- 自动识别 `~/.codex`。
+- 启动时快速读取 SQLite 会话列表。
+- 中文固定三栏界面，不使用会跳动的系统侧栏。
+- 按全部、API、官方、异常会话筛选。
+- 支持选中会话 `API → 官方`、`官方 → API`。
+- 支持全部 API 会话转官方、全部官方会话转 API。
+- 需要时可同步校验 session JSONL 文件。
+- 转换前自动创建本地备份。
+- Codex 或 `codex app-server` 正在运行时拒绝写入，避免被运行中的 Codex 覆盖。
+- 可恢复最近一次备份。
 
-## Build
+## 构建
 
 ```bash
-swift test
-swift build -c release
+swift run CodexVaultSmokeTests
+swift build -c release --product CodexVault
 ./scripts/package-macos.sh
 ```
 
-The app bundle is written to:
+应用包输出到：
 
 ```text
-dist/Codex Vault.app
+dist/Codex 对话管家.app
 ```
 
-The DMG is written to:
+DMG 输出到：
 
 ```text
 dist/Codex-Vault.dmg
 ```
 
-## Safety
+## 安全规则
 
-Codex Vault reads:
+应用会读取：
 
 ```text
 ~/.codex/sessions
@@ -48,9 +48,9 @@ Codex Vault reads:
 ~/.codex/state_5.sqlite
 ```
 
-Before provider migration or restore, Codex Vault checks for running Codex processes and refuses to write while Codex or `codex app-server` is active. Migration creates an automatic backup before changing `model_provider`.
+执行转换或恢复前，会检查 Codex 是否完全退出。转换会同时更新 session JSONL 的 `session_meta.model_provider` 和 SQLite 里的 provider 字段，并在写入前自动备份。
 
-Backups are stored under:
+备份目录：
 
 ```text
 ~/Library/Application Support/Codex Vault/Backups
