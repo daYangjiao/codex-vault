@@ -8,9 +8,10 @@ It scans local Codex session files and `state_5.sqlite`, then shows conversation
 
 - Native macOS SwiftUI app.
 - Auto-detects `~/.codex`.
-- Lists local Codex conversations across providers.
+- Opens with a fast SQLite-only conversation list.
 - Shows provider, project path, update time, and diagnostics status.
-- Detects provider mismatches between session JSONL metadata and SQLite.
+- Runs deeper session-file sync only when requested.
+- Detects provider mismatches between session JSONL metadata and SQLite after sync.
 - Creates local backups.
 - Migrates the selected conversation to another provider after Codex is closed.
 - Restores the latest Codex Vault backup.

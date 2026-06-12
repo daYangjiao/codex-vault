@@ -102,9 +102,9 @@ struct CodexVaultSmokeTests {
         try exec(db, """
         INSERT INTO threads (id, rollout_path, created_at, updated_at, source, model_provider, cwd, title, archived)
         VALUES
-        ('11111111-1111-4111-8111-111111111111', 'sessions/one.jsonl', 1781268000, 1781268005, 'vscode', 'openai', '/Users/test/project-a', 'Build the scanner', 0),
-        ('22222222-2222-4222-8222-222222222222', 'sessions/two.jsonl', 1781271600, 1781271605, 'vscode', 'openai', '/Users/test/project-b', 'Migrate this conversation', 0),
-        ('44444444-4444-4444-8444-444444444444', 'sessions/missing.jsonl', 1781275200, 1781275205, 'vscode', 'custom', '/Users/test/project-d', 'Database only', 0);
+        ('11111111-1111-4111-8111-111111111111', '\(url.deletingLastPathComponent().path)/sessions/2026/06/12/rollout-2026-06-12T10-00-00-11111111-1111-4111-8111-111111111111.jsonl', 1781268000, 1781268005, 'vscode', 'openai', '/Users/test/project-a', 'Build the scanner', 0),
+        ('22222222-2222-4222-8222-222222222222', '\(url.deletingLastPathComponent().path)/sessions/2026/06/12/rollout-2026-06-12T11-00-00-22222222-2222-4222-8222-222222222222.jsonl', 1781271600, 1781271605, 'vscode', 'openai', '/Users/test/project-b', 'Migrate this conversation', 0),
+        ('44444444-4444-4444-8444-444444444444', '\(url.deletingLastPathComponent().path)/sessions/missing.jsonl', 1781275200, 1781275205, 'vscode', 'custom', '/Users/test/project-d', 'Database only', 0);
         """)
     }
 

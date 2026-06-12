@@ -109,6 +109,7 @@ public struct StateDatabase: Sendable {
         let selectedColumns = [
             "id",
             "model_provider",
+            columns.contains("rollout_path") ? "rollout_path" : "'' AS rollout_path",
             columns.contains("cwd") ? "cwd" : "'' AS cwd",
             columns.contains("title") ? "title" : "'' AS title",
             columns.contains("updated_at") ? "updated_at" : "0 AS updated_at",
@@ -124,8 +125,8 @@ public struct StateDatabase: Sendable {
 
         var threads: [DatabaseThread] = []
         while sqlite3_step(statement) == SQLITE_ROW {
-            let updatedAtSeconds = sqlite3_column_int64(statement, 4)
-            let updatedAtMilliseconds = sqlite3_column_int64(statement, 5)
+            let updatedAtSeconds = sqlite3_column_int64(statement, 5)
+            let updatedAtMilliseconds = sqlite3_column_int64(statement, 6)
             let updatedAt: Date?
             if updatedAtMilliseconds > 0 {
                 updatedAt = Date(timeIntervalSince1970: TimeInterval(updatedAtMilliseconds) / 1000)
@@ -138,10 +139,11 @@ public struct StateDatabase: Sendable {
             threads.append(DatabaseThread(
                 id: columnString(statement, 0) ?? "",
                 provider: columnString(statement, 1),
-                projectPath: columnString(statement, 2),
-                title: columnString(statement, 3) ?? "",
+                projectPath: columnString(statement, 3),
+                title: columnString(statement, 4) ?? "",
+                rolloutPath: columnString(statement, 2),
                 updatedAt: updatedAt,
-                isArchived: sqlite3_column_int(statement, 6) != 0
+                isArchived: sqlite3_column_int(statement, 7) != 0
             ))
         }
         return threads.filter { !$0.id.isEmpty }

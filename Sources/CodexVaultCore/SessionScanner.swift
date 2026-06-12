@@ -46,32 +46,22 @@ public struct SessionScanner: Sendable {
         }
         defer { try? handle.close() }
 
-        var lineBuffer = Data()
         var meta: SessionMetaPayload?
         var firstUserMessage: String?
         var newestTimestamp: Date?
+        var lineCount = 0
 
-        while let byte = try readByte(from: handle) {
-            if byte == 10 {
-                consumeLine(
-                    lineBuffer,
-                    meta: &meta,
-                    firstUserMessage: &firstUserMessage,
-                    newestTimestamp: &newestTimestamp
-                )
-                lineBuffer.removeAll(keepingCapacity: true)
-            } else {
-                lineBuffer.append(byte)
-            }
-        }
-
-        if !lineBuffer.isEmpty {
+        while let line = try readLine(from: handle), lineCount < 200 {
+            lineCount += 1
             consumeLine(
-                lineBuffer,
+                line,
                 meta: &meta,
                 firstUserMessage: &firstUserMessage,
                 newestTimestamp: &newestTimestamp
             )
+            if meta != nil, firstUserMessage != nil {
+                break
+            }
         }
 
         guard let meta else {
@@ -92,12 +82,23 @@ public struct SessionScanner: Sendable {
         )
     }
 
-    private func readByte(from handle: FileHandle) throws -> UInt8? {
-        let data = try handle.read(upToCount: 1)
-        guard let data, !data.isEmpty else {
-            return nil
+    private func readLine(from handle: FileHandle) throws -> Data? {
+        var buffer = Data()
+        while let data = try handle.read(upToCount: 4096), !data.isEmpty {
+            if let newlineIndex = data.firstIndex(of: 10) {
+                buffer.append(data[..<newlineIndex])
+                let offset = UInt64(data.count - newlineIndex - 1)
+                if offset > 0 {
+                    try handle.seek(toOffset: handle.offsetInFile - offset)
+                }
+                return buffer
+            }
+            buffer.append(data)
+            if buffer.count > 2_000_000 {
+                return buffer
+            }
         }
-        return data[0]
+        return buffer.isEmpty ? nil : buffer
     }
 
     private func consumeLine(

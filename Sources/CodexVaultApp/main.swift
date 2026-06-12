@@ -51,6 +51,7 @@ final class VaultStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var infoMessage: String?
     @Published var isScanning = false
+    @Published var scanMode = "Quick list"
 
     private let locator = CodexRootLocator()
     private let scanner = CodexVaultScanner()
@@ -59,7 +60,7 @@ final class VaultStore: ObservableObject {
 
     init() {
         self.root = locator.defaultRoot()
-        refresh()
+        Task { await refreshQuick() }
     }
 
     var conversations: [Conversation] {
@@ -86,17 +87,54 @@ final class VaultStore: ObservableObject {
     }
 
     func refresh() {
+        Task { await refreshQuick() }
+    }
+
+    func syncDeep() {
+        Task { await refreshDeep() }
+    }
+
+    private func refreshQuick() async {
         isScanning = true
+        scanMode = "Loading list"
         errorMessage = nil
+        let root = self.root
+        let scanner = self.scanner
         do {
             try locator.validate(root: root)
-            result = try scanner.scan(root: root)
-            if selectedConversationID == nil {
-                selectedConversationID = result?.conversations.first?.id
+            let scan = try await Task.detached(priority: .userInitiated) {
+                try scanner.quickScan(root: root)
+            }.value
+            result = scan
+            scanMode = "Quick list"
+            if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
+                selectedConversationID = scan.conversations.first?.id
             }
         } catch {
             result = nil
             selectedConversationID = nil
+            errorMessage = error.localizedDescription
+        }
+        isScanning = false
+    }
+
+    private func refreshDeep() async {
+        isScanning = true
+        scanMode = "Syncing files"
+        errorMessage = nil
+        let root = self.root
+        let scanner = self.scanner
+        do {
+            try locator.validate(root: root)
+            let scan = try await Task.detached(priority: .userInitiated) {
+                try scanner.scan(root: root)
+            }.value
+            result = scan
+            scanMode = "Synced"
+            if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
+                selectedConversationID = scan.conversations.first?.id
+            }
+        } catch {
             errorMessage = error.localizedDescription
         }
         isScanning = false
@@ -128,7 +166,7 @@ final class VaultStore: ObservableObject {
                 targetProvider: targetProvider
             )
             infoMessage = "Migrated \(report.migratedCount) conversation(s) to \(report.targetProvider). Backup: \(report.backup.backupDirectory.path)"
-            refresh()
+            Task { await refreshQuick() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -138,7 +176,7 @@ final class VaultStore: ObservableObject {
         do {
             let backup = try migrationEngine.restoreLatestBackup(root: root)
             infoMessage = "Restored backup: \(backup.backupDirectory.path)"
-            refresh()
+            Task { await refreshQuick() }
         } catch {
             errorMessage = error.localizedDescription
         }
@@ -189,7 +227,14 @@ struct MainView: View {
                 } label: {
                     Label("Refresh", systemImage: "arrow.clockwise")
                 }
-                .help("Refresh conversations")
+                .help("Refresh the fast SQLite conversation list")
+
+                Button {
+                    store.syncDeep()
+                } label: {
+                    Label("Sync", systemImage: "arrow.triangle.2.circlepath")
+                }
+                .help("Scan session files for deeper provider diagnostics")
 
                 Button {
                     store.chooseCodexRoot()
@@ -441,7 +486,12 @@ struct SearchHeaderView: View {
                     MetricView(title: "Providers", value: "\(result.providerSummaries.count)")
                     MetricView(title: "Problems", value: "\(result.diagnostics.totalProblems)")
                     Spacer()
-                    Text(result.databaseAvailable ? "SQLite connected" : "Session files only")
+                    if store.isScanning {
+                        ProgressView()
+                            .scaleEffect(0.6)
+                            .frame(width: 18, height: 18)
+                    }
+                    Text("\(store.scanMode) · \(result.databaseAvailable ? "SQLite" : "Files")")
                         .font(.caption)
                         .foregroundStyle(result.databaseAvailable ? Color.secondary : Color.orange)
                 }
@@ -476,11 +526,23 @@ struct ConversationDetailView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text(conversation.title)
+                        Text("Session")
                             .font(.title2)
                             .fontWeight(.semibold)
+                        HStack {
+                            StatusBadge(status: conversation.status)
+                            Text(shortID(conversation.id))
+                                .font(.system(.caption, design: .monospaced))
+                                .foregroundStyle(.secondary)
+                        }
+                    }
+
+                    DetailSection("Preview") {
+                        Text(conversation.title)
+                            .font(.body)
+                            .foregroundStyle(.secondary)
                             .lineLimit(3)
-                        StatusBadge(status: conversation.status)
+                            .textSelection(.enabled)
                     }
 
                     DetailSection("Identity") {
@@ -531,6 +593,10 @@ struct ConversationDetailView: View {
 
     private func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func shortID(_ id: String) -> String {
+        String(id.prefix(8))
     }
 }
 

@@ -42,17 +42,31 @@ public struct MigrationEngine: Sendable {
             }
         }
 
-        let records = try sessionScanner.scan(root: root)
+        let databaseURL = root.appendingPathComponent("state_5.sqlite")
+        let databaseThreads = try stateDatabase.readThreads(databaseURL: databaseURL)
         let selectedIDs = Set(conversationIDs)
-        let selectedRecords = records.filter { selectedIDs.contains($0.id) }
+        let selectedThreads = databaseThreads.filter { selectedIDs.contains($0.id) }
+        let selectedRecords = selectedThreads.compactMap { thread -> SessionRecord? in
+            guard let rolloutPath = thread.rolloutPath, !rolloutPath.isEmpty else {
+                return nil
+            }
+            return SessionRecord(
+                id: thread.id,
+                provider: thread.provider,
+                projectPath: thread.projectPath,
+                title: thread.title,
+                filePath: URL(fileURLWithPath: rolloutPath),
+                lastUpdatedAt: thread.updatedAt,
+                isArchived: thread.isArchived
+            )
+        }
         let backup = try backupManager.createBackup(
             root: root,
             reason: "Before provider migration to \(targetProvider)",
-            conversationCount: records.count
+            conversationCount: databaseThreads.count
         )
 
         try sessionFileStore.updateProvider(records: selectedRecords, targetProvider: targetProvider)
-        let databaseURL = root.appendingPathComponent("state_5.sqlite")
         try stateDatabase.updateProvider(databaseURL: databaseURL, conversationIDs: Array(selectedIDs), targetProvider: targetProvider)
 
         return MigrationReport(migratedCount: conversationIDs.count, targetProvider: targetProvider, backup: backup)

@@ -135,6 +135,7 @@ public struct DatabaseThread: Hashable, Sendable {
     public let provider: String?
     public let projectPath: String?
     public let title: String
+    public let rolloutPath: String?
     public let updatedAt: Date?
     public let isArchived: Bool
 }

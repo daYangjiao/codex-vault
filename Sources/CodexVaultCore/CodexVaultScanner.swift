@@ -28,6 +28,37 @@ public struct CodexVaultScanner: Sendable {
         )
     }
 
+    public func quickScan(root: URL) throws -> ScanResult {
+        let databaseURL = root.appendingPathComponent("state_5.sqlite")
+        let databaseAvailable = FileManager.default.fileExists(atPath: databaseURL.path)
+        let databaseThreads = try stateDatabase.readThreads(databaseURL: databaseURL)
+        let conversations = merge(sessionRecords: [], databaseThreads: databaseThreads)
+            .map { conversation in
+                Conversation(
+                    id: conversation.id,
+                    title: conversation.title,
+                    sessionProvider: conversation.databaseProvider,
+                    databaseProvider: conversation.databaseProvider,
+                    projectPath: conversation.projectPath,
+                    sessionFilePath: conversation.sessionFilePath,
+                    lastUpdatedAt: conversation.lastUpdatedAt,
+                    isArchived: conversation.isArchived,
+                    status: conversation.isArchived ? .archived : .ok
+                )
+            }
+        let diagnostics = buildDiagnostics(conversations)
+        let providers = buildProviderSummaries(conversations)
+
+        return ScanResult(
+            root: root,
+            conversations: conversations,
+            providerSummaries: providers,
+            diagnostics: diagnostics,
+            scannedAt: Date(),
+            databaseAvailable: databaseAvailable
+        )
+    }
+
     private func merge(sessionRecords: [SessionRecord], databaseThreads: [DatabaseThread]) -> [Conversation] {
         let sessionsByID = Dictionary(uniqueKeysWithValues: sessionRecords.map { ($0.id, $0) })
         let threadsByID = Dictionary(uniqueKeysWithValues: databaseThreads.map { ($0.id, $0) })
@@ -44,7 +75,7 @@ public struct CodexVaultScanner: Sendable {
                 sessionProvider: session?.provider,
                 databaseProvider: thread?.provider,
                 projectPath: session?.projectPath ?? thread?.projectPath,
-                sessionFilePath: session?.filePath,
+                sessionFilePath: session?.filePath ?? thread.flatMap { rolloutURL($0.rolloutPath) },
                 lastUpdatedAt: maxDate(session?.lastUpdatedAt, thread?.updatedAt),
                 isArchived: session?.isArchived ?? thread?.isArchived ?? false,
                 status: status
@@ -90,6 +121,13 @@ public struct CodexVaultScanner: Sendable {
         case (.none, .none):
             return nil
         }
+    }
+
+    private func rolloutURL(_ path: String?) -> URL? {
+        guard let path, !path.isEmpty else {
+            return nil
+        }
+        return URL(fileURLWithPath: path)
     }
 
     private func buildDiagnostics(_ conversations: [Conversation]) -> DiagnosticsSummary {

@@ -12,6 +12,7 @@ CONTENTS_DIR="$BUILD_APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
 EXECUTABLE="$ROOT_DIR/.build/release/CodexVault"
+ICON_FILE="$ROOT_DIR/Assets/AppIcon/CodexVault.icns"
 DMG_PATH="$DIST_DIR/Codex-Vault.dmg"
 TEMP_DMG_PATH="$WORK_DIR/Codex-Vault.dmg"
 
@@ -29,6 +30,9 @@ mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$EXECUTABLE" "$MACOS_DIR/CodexVault"
 chmod +x "$MACOS_DIR/CodexVault"
+if [[ -f "$ICON_FILE" ]]; then
+  cp "$ICON_FILE" "$RESOURCES_DIR/CodexVault.icns"
+fi
 
 cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <?xml version="1.0" encoding="UTF-8"?>
@@ -40,6 +44,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundleDisplayName</key>
   <string>Codex Vault</string>
   <key>CFBundleExecutable</key>
+  <string>CodexVault</string>
+  <key>CFBundleIconFile</key>
   <string>CodexVault</string>
   <key>CFBundleIdentifier</key>
   <string>com.dayangjiao.codexvault</string>
