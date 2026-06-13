@@ -479,18 +479,26 @@ struct MainView: View {
 
                 Divider()
 
-                VStack(spacing: 0) {
-                    ConversionPanel(store: store)
-                    Divider()
-                    ConversationListView(store: store)
+                ZStack(alignment: .trailing) {
+                    VStack(spacing: 0) {
+                        ConversionPanel(store: store)
+                        Divider()
+                        ConversationListView(store: store)
+                    }
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                    if store.showsInspector {
+                        HStack(spacing: 0) {
+                            Divider()
+                            InspectorPanel(store: store)
+                                .frame(width: 340)
+                        }
+                        .background(Color(nsColor: .windowBackgroundColor))
+                        .shadow(color: .black.opacity(0.12), radius: 18, x: -4, y: 0)
+                        .transition(.opacity)
+                    }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
-
-                if store.showsInspector {
-                    Divider()
-                    InspectorPanel(store: store)
-                        .frame(width: 340)
-                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -1086,36 +1094,42 @@ struct ConversationRowView: View {
 
     var body: some View {
         HStack(spacing: 9) {
-            Button(action: toggleChecked) {
-                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundStyle(checked ? Color.black : Color.secondary)
-                    .frame(width: 20, height: 20)
-            }
-            .buttonStyle(.plain)
+            Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                .font(.system(size: 15, weight: .semibold))
+                .foregroundStyle(checked ? Color.black : Color.secondary)
+                .frame(width: 24, height: 42)
+                .contentShape(Rectangle())
+                .onTapGesture {
+                    toggleChecked()
+                }
             .help(checked ? "取消勾选" : "勾选会话")
 
-            Button(action: select) {
-                HStack(spacing: 9) {
-                    Text(conversation.title)
-                        .font(.system(size: 14, weight: selected ? .semibold : .medium))
-                        .lineLimit(1)
+            HStack(spacing: 9) {
+                Text(conversation.title)
+                    .font(.system(size: 14, weight: selected ? .semibold : .medium))
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
-                    Spacer(minLength: 8)
-
-                    SourcePill(sourceKind: conversation.sourceKind)
-                    ProviderPill(provider: conversation.effectiveProvider)
-                    Text(RelativeTimeText.string(from: conversation.lastUpdatedAt))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .monospacedDigit()
-                        .frame(width: 46, alignment: .trailing)
-                    StatusBadge(status: conversation.status)
-                }
-                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
-                .contentShape(Rectangle())
+                SourcePill(sourceKind: conversation.sourceKind)
+                    .fixedSize()
+                ProviderPill(provider: conversation.effectiveProvider)
+                    .fixedSize()
+                Text(RelativeTimeText.string(from: conversation.lastUpdatedAt))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .monospacedDigit()
+                    .lineLimit(1)
+                    .frame(width: 48, alignment: .trailing)
+                StatusBadge(status: conversation.status)
+                    .fixedSize()
             }
-            .buttonStyle(.plain)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .frame(height: 42)
+            .contentShape(Rectangle())
+            .onTapGesture {
+                select()
+            }
         }
         .padding(.horizontal, 8)
         .frame(height: 42)

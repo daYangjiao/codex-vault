@@ -23,6 +23,7 @@ struct CodexVaultSmokeTests {
         let cli = scan.conversations.first { $0.id == "44444444-4444-4444-8444-444444444444" }
         try expect(desktop?.source == "vscode", "expected desktop source")
         try expect(cli?.source == "exec", "expected CLI source")
+        try expectStableConversationRowLayout()
 
         let mismatch = scan.conversations.first { $0.id == "22222222-2222-4222-8222-222222222222" }
         try expect(mismatch?.status == .providerMismatch, "expected mismatch status")
@@ -165,6 +166,24 @@ struct CodexVaultSmokeTests {
             "22222222-2222-4222-8222-222222222222",
             "44444444-4444-4444-8444-444444444444"
         ]), "checked scope should only include checked API conversations")
+    }
+
+    private static func expectStableConversationRowLayout() throws {
+        let root = URL(fileURLWithPath: FileManager.default.currentDirectoryPath, isDirectory: true)
+        let sourceURL = root.appendingPathComponent("Sources/CodexVaultApp/main.swift")
+        let source = try String(contentsOf: sourceURL, encoding: .utf8)
+        let row = try slice(source, from: "struct ConversationRowView: View", to: "struct MetricView: View")
+        try expect(!row.contains("Button(action: select)"), "conversation rows should not wrap row content in a SwiftUI Button")
+        try expect(!row.contains("Button(action: toggleChecked)"), "conversation row check control should not use a SwiftUI Button")
+        try expect(row.contains(".onTapGesture"), "conversation rows should use stable tap gestures for selection")
+    }
+
+    private static func slice(_ text: String, from start: String, to end: String) throws -> String {
+        guard let startRange = text.range(of: start),
+              let endRange = text.range(of: end, range: startRange.upperBound..<text.endIndex) else {
+            throw SmokeTestError("source slice not found: \(start) -> \(end)")
+        }
+        return String(text[startRange.lowerBound..<endRange.lowerBound])
     }
 
     private static func write(_ url: URL, _ text: String) throws {
