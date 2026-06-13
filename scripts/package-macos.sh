@@ -58,9 +58,9 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.3</string>
+  <string>0.1.4</string>
   <key>CFBundleVersion</key>
-  <string>4</string>
+  <string>5</string>
   <key>LSApplicationCategoryType</key>
   <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
@@ -80,7 +80,7 @@ printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 cat > "$RESOURCES_DIR/README.txt" <<'TEXT'
 Codex 对话管家是一个本机 Codex 聊天记录转换工具。
 
-它默认只读取 ~/.codex/state_5.sqlite 会话列表，需要时再同步校验 session 文件。
+它默认只读取会话列表，不展开完整聊天内容。转换前请先退出 Codex，并结束正在运行的任务。
 TEXT
 
 if command -v xattr >/dev/null 2>&1; then

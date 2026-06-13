@@ -177,6 +177,40 @@ public struct MigrationReport: Sendable {
     }
 }
 
+public struct MigrationScope: Sendable, Equatable {
+    public let conversationIDs: [String]
+    public let targetProvider: String
+    public let sourceProvider: String
+    public let usesSelection: Bool
+
+    public init(conversationIDs: [String], targetProvider: String, sourceProvider: String, usesSelection: Bool) {
+        self.conversationIDs = conversationIDs
+        self.targetProvider = targetProvider
+        self.sourceProvider = sourceProvider
+        self.usesSelection = usesSelection
+    }
+}
+
+public enum MigrationScopeResolver {
+    public static func resolve(
+        conversations: [Conversation],
+        checkedIDs: Set<String>,
+        targetProvider: String
+    ) -> MigrationScope {
+        let sourceProvider = targetProvider == "openai" ? "custom" : "openai"
+        let candidates = conversations.filter { conversation in
+            let checkedMatches = checkedIDs.isEmpty || checkedIDs.contains(conversation.id)
+            return checkedMatches && conversation.effectiveProvider == sourceProvider
+        }
+        return MigrationScope(
+            conversationIDs: candidates.map(\.id),
+            targetProvider: targetProvider,
+            sourceProvider: sourceProvider,
+            usesSelection: !checkedIDs.isEmpty
+        )
+    }
+}
+
 public struct DeletionReport: Sendable {
     public let deletedCount: Int
     public let deletedDatabaseRowCount: Int
@@ -196,6 +230,12 @@ public struct DeletionReport: Sendable {
         self.deletedSessionFileCount = deletedSessionFileCount
         self.deletedIndexEntryCount = deletedIndexEntryCount
         self.backup = backup
+    }
+}
+
+public extension Conversation {
+    var effectiveProvider: String? {
+        sessionProvider ?? databaseProvider
     }
 }
 

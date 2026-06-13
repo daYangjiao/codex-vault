@@ -26,6 +26,8 @@ struct CodexVaultSmokeTests {
 
         let mismatch = scan.conversations.first { $0.id == "22222222-2222-4222-8222-222222222222" }
         try expect(mismatch?.status == .providerMismatch, "expected mismatch status")
+        try expectMigrationScopeUsesAllWhenNothingIsChecked(scan.conversations)
+        try expectMigrationScopeUsesCheckedItemsWhenPresent(scan.conversations)
 
         let backupsRoot = root.appendingPathComponent("vault-backups", isDirectory: true)
         let migration = MigrationEngine(backupManager: BackupManager(backupsRoot: backupsRoot))
@@ -132,6 +134,37 @@ struct CodexVaultSmokeTests {
         try expect(data.range(of: corruptPayloadLine) != nil, "unparseable payload line should remain byte-for-byte intact")
         let migrated = try SessionScanner().scan(root: root)
         try expect(records.count == migrated.count, "large payload migration should not change session count")
+    }
+
+    private static func expectMigrationScopeUsesAllWhenNothingIsChecked(_ conversations: [Conversation]) throws {
+        let scope = MigrationScopeResolver.resolve(
+            conversations: conversations,
+            checkedIDs: [],
+            targetProvider: "openai"
+        )
+        try expect(scope.usesSelection == false, "empty checked set should use all matching conversations")
+        try expect(scope.sourceProvider == "custom", "openai target should migrate from custom")
+        try expect(Set(scope.conversationIDs) == Set([
+            "22222222-2222-4222-8222-222222222222",
+            "44444444-4444-4444-8444-444444444444"
+        ]), "empty checked set should include all API conversations")
+    }
+
+    private static func expectMigrationScopeUsesCheckedItemsWhenPresent(_ conversations: [Conversation]) throws {
+        let scope = MigrationScopeResolver.resolve(
+            conversations: conversations,
+            checkedIDs: [
+                "11111111-1111-4111-8111-111111111111",
+                "22222222-2222-4222-8222-222222222222",
+                "44444444-4444-4444-8444-444444444444"
+            ],
+            targetProvider: "openai"
+        )
+        try expect(scope.usesSelection == true, "non-empty checked set should use checked conversations")
+        try expect(Set(scope.conversationIDs) == Set([
+            "22222222-2222-4222-8222-222222222222",
+            "44444444-4444-4444-8444-444444444444"
+        ]), "checked scope should only include checked API conversations")
     }
 
     private static func write(_ url: URL, _ text: String) throws {

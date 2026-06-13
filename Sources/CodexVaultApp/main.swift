@@ -20,13 +20,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         let store = VaultStore()
         let contentView = MainView(store: store)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 1220, height: 760),
+            contentRect: NSRect(x: 0, y: 0, width: 1180, height: 760),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Codex 对话管家"
-        window.minSize = NSSize(width: 980, height: 600)
+        window.minSize = NSSize(width: 900, height: 600)
         window.center()
         window.contentView = NSHostingView(rootView: contentView)
         window.makeKeyAndOrderFront(nil)
@@ -54,6 +54,7 @@ final class VaultStore: ObservableObject {
     @Published var infoMessage: String?
     @Published var isScanning = false
     @Published var scanMode = "列表模式"
+    @Published var showsInspector = false
 
     private let locator = CodexRootLocator()
     private let scanner = CodexVaultScanner()
@@ -108,11 +109,10 @@ final class VaultStore: ObservableObject {
     }
 
     var selectedConversation: Conversation? {
-        if let selectedConversationID,
-           let selected = conversations.first(where: { $0.id == selectedConversationID }) {
-            return selected
+        guard let selectedConversationID else {
+            return nil
         }
-        return conversations.first
+        return conversations.first(where: { $0.id == selectedConversationID })
     }
 
     var totalCount: Int {
@@ -130,7 +130,7 @@ final class VaultStore: ObservableObject {
     var checkedProviderSummary: String {
         let checked = checkedConversationsInCurrentList()
         guard !checked.isEmpty else {
-            return selectedConversation?.effectiveProvider.map(ProviderText.name) ?? "未选择"
+            return "默认全部"
         }
         let api = checked.filter { $0.effectiveProvider == "custom" }.count
         let official = checked.filter { $0.effectiveProvider == "openai" }.count
@@ -164,10 +164,10 @@ final class VaultStore: ObservableObject {
 
     func selectConversation(_ conversation: Conversation) {
         selectedConversationID = conversation.id
+        showsInspector = true
     }
 
     func toggleChecked(_ conversation: Conversation) {
-        selectedConversationID = conversation.id
         if checkedConversationIDs.contains(conversation.id) {
             checkedConversationIDs.remove(conversation.id)
         } else {
@@ -234,8 +234,8 @@ final class VaultStore: ObservableObject {
 
     func chooseCodexRoot() {
         let panel = NSOpenPanel()
-        panel.title = "选择 Codex 数据目录"
-        panel.message = "请选择本机的 .codex 文件夹。"
+        panel.title = "选择 Codex 记录目录"
+        panel.message = "请选择本机 Codex 的记录目录。"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
         panel.allowsMultipleSelection = false
@@ -246,6 +246,7 @@ final class VaultStore: ObservableObject {
             selectedSource = nil
             checkedConversationIDs.removeAll()
             selectedConversationID = nil
+            showsInspector = false
             refresh()
         }
     }
@@ -255,9 +256,13 @@ final class VaultStore: ObservableObject {
         errorMessage = nil
     }
 
+    func closeInspector() {
+        showsInspector = false
+    }
+
     private func refreshQuick() async {
         isScanning = true
-        scanMode = "读取列表"
+        scanMode = "正在更新"
         errorMessage = nil
         let root = self.root
         let scanner = self.scanner
@@ -267,7 +272,7 @@ final class VaultStore: ObservableObject {
                 try scanner.quickScan(root: root)
             }.value
             result = scan
-            scanMode = "列表模式"
+            scanMode = "已就绪"
             keepSelection(in: scan)
         } catch {
             result = nil
@@ -280,7 +285,7 @@ final class VaultStore: ObservableObject {
 
     private func refreshDeep() async {
         isScanning = true
-        scanMode = "同步校验"
+        scanMode = "正在检查"
         errorMessage = nil
         let root = self.root
         let scanner = self.scanner
@@ -290,7 +295,7 @@ final class VaultStore: ObservableObject {
                 try scanner.scan(root: root)
             }.value
             result = scan
-            scanMode = "校验完成"
+            scanMode = "检查完成"
             keepSelection(in: scan)
         } catch {
             errorMessage = readableMessage(error)
@@ -355,7 +360,7 @@ final class VaultStore: ObservableObject {
                 if ids.contains(selectedConversationID ?? "") {
                     selectedConversationID = nil
                 }
-                infoMessage = "\(scopeName)已删除，共 \(report.deletedCount) 条。清理文件 \(report.deletedSessionFileCount) 个、索引 \(report.deletedIndexEntryCount) 条、数据库 \(report.deletedDatabaseRowCount) 条。已自动备份。"
+                infoMessage = "\(scopeName)已删除，共 \(report.deletedCount) 条。已自动备份。"
                 await refreshQuick()
             } catch {
                 errorMessage = readableMessage(error)
@@ -365,54 +370,35 @@ final class VaultStore: ObservableObject {
         }
     }
 
-    private func selectedConversationIDsForAction() -> [String] {
-        let checked = checkedIDsInCurrentList()
-        if !checked.isEmpty {
-            return checked
-        }
-        if let selectedConversationID,
-           conversations.contains(where: { $0.id == selectedConversationID }) {
-            return [selectedConversationID]
-        }
-        return selectedConversation.map { [$0.id] } ?? []
-    }
-
     func candidateConversationIDs(to targetProvider: String) -> [String] {
-        let sourceProvider = targetProvider == "openai" ? "custom" : "openai"
-        let baseIDs = selectedConversationIDsForAction()
-        let conversationsByID = Dictionary(uniqueKeysWithValues: conversations.map { ($0.id, $0) })
-        return baseIDs.filter { id in
-            conversationsByID[id]?.effectiveProvider == sourceProvider
-        }
+        migrationScope(to: targetProvider).conversationIDs
     }
 
     func selectedScopeName(to targetProvider: String) -> String {
-        let count = candidateConversationIDs(to: targetProvider).count
-        if checkedCount > 0 {
-            return "已勾选 \(count) 条会话"
-        }
-        return "选中会话"
+        let scope = migrationScope(to: targetProvider)
+        return scope.usesSelection ? "已选 \(scope.conversationIDs.count) 条会话" : "全部\(ProviderText.name(scope.sourceProvider))会话"
     }
 
     func migrateSelection(to targetProvider: String) {
-        let ids = candidateConversationIDs(to: targetProvider)
-        performMigration(ids: ids, targetProvider: targetProvider, scopeName: selectedScopeName(to: targetProvider))
+        let scope = migrationScope(to: targetProvider)
+        performMigration(ids: scope.conversationIDs, targetProvider: targetProvider, scopeName: selectedScopeName(to: targetProvider))
     }
 
     func deleteSelection() {
-        let ids = selectedConversationIDsForAction()
-        let scopeName = checkedCount > 0 ? "已勾选 \(ids.count) 条会话" : "当前会话"
+        let ids = checkedIDsInCurrentList()
+        let scopeName = "已勾选 \(ids.count) 条会话"
         performDeletion(ids: ids, scopeName: scopeName)
     }
 
     func deleteConversation(_ conversation: Conversation) {
-        performDeletion(ids: [conversation.id], scopeName: "当前会话")
+        performDeletion(ids: [conversation.id], scopeName: "这条会话")
     }
 
     private func keepSelection(in scan: ScanResult) {
         pruneCheckedIDs(scan.conversations)
         if selectedConversationID == nil || !(scan.conversations.contains { $0.id == selectedConversationID }) {
-            selectedConversationID = conversations.first?.id ?? scan.conversations.first?.id
+            selectedConversationID = nil
+            showsInspector = false
         }
     }
 
@@ -421,12 +407,21 @@ final class VaultStore: ObservableObject {
            conversations.contains(where: { $0.id == selectedConversationID }) {
             return
         }
-        selectedConversationID = conversations.first?.id
+        selectedConversationID = nil
+        showsInspector = false
     }
 
     private func checkedIDsInCurrentList() -> [String] {
         let visibleIDs = Set(conversations.map(\.id))
         return checkedConversationIDs.filter { visibleIDs.contains($0) }
+    }
+
+    func migrationScope(to targetProvider: String) -> MigrationScope {
+        MigrationScopeResolver.resolve(
+            conversations: conversations,
+            checkedIDs: Set(checkedIDsInCurrentList()),
+            targetProvider: targetProvider
+        )
     }
 
     private func checkedConversationsInCurrentList() -> [Conversation] {
@@ -447,11 +442,11 @@ final class VaultStore: ObservableObject {
             case .unreadableFile(let url):
                 return "无法读取文件：\(url.path)"
             case .sqliteOpenFailed(let message):
-                return "无法打开 Codex 数据库：\(message)"
+                return "无法打开 Codex 会话列表：\(message)"
             case .sqlitePrepareFailed(let message):
-                return "无法查询 Codex 数据库：\(message)"
+                return "无法查询 Codex 会话列表：\(message)"
             case .unsupportedDatabaseSchema:
-                return "当前 Codex 数据库结构暂不支持。"
+                return "当前 Codex 记录格式暂不支持。"
             case .codexIsRunning(let processes):
                 let details = processes.map { "\($0.id)：\($0.command)" }.joined(separator: "\n")
                 return "请先完全退出 Codex，再操作聊天记录。\n\(details)"
@@ -491,10 +486,11 @@ struct MainView: View {
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
 
-                Divider()
-
-                InspectorPanel(store: store)
-                    .frame(width: 340)
+                if store.showsInspector {
+                    Divider()
+                    InspectorPanel(store: store)
+                        .frame(width: 340)
+                }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
@@ -553,7 +549,7 @@ struct HeaderView: View {
             HeaderButton(title: "刷新列表", icon: "arrow.clockwise") {
                 store.refresh()
             }
-            HeaderButton(title: "同步校验", icon: "arrow.triangle.2.circlepath") {
+            HeaderButton(title: "检查记录", icon: "arrow.triangle.2.circlepath") {
                 store.syncDeep()
             }
             HeaderButton(title: "选择目录", icon: "folder") {
@@ -664,7 +660,7 @@ struct FilterPanel: View {
                     title: "全部会话",
                     icon: "tray.full",
                     count: store.totalCount,
-                    selected: store.selectedProvider == nil && !store.showProblemsOnly
+                    selected: store.selectedProvider == nil && store.selectedSource == nil && !store.showProblemsOnly
                 ) {
                     store.setFilter(provider: nil)
                 }
@@ -724,20 +720,6 @@ struct FilterPanel: View {
                 }
             }
 
-            Divider()
-
-            VStack(alignment: .leading, spacing: 6) {
-                Text("当前目录")
-                    .font(.caption)
-                    .fontWeight(.semibold)
-                    .foregroundStyle(.secondary)
-                Text(store.root.path)
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(4)
-                    .textSelection(.enabled)
-            }
-
             Spacer()
 
             VStack(alignment: .leading, spacing: 5) {
@@ -750,7 +732,7 @@ struct FilterPanel: View {
                             .scaleEffect(0.55)
                             .frame(width: 14, height: 14)
                     }
-                    Text(store.result?.databaseAvailable == true ? "读取 SQLite 列表" : "等待数据")
+                    Text(store.result?.databaseAvailable == true ? "本机会话列表" : "等待数据")
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                 }
@@ -794,25 +776,21 @@ struct FilterRow: View {
 struct ConversionPanel: View {
     @ObservedObject var store: VaultStore
 
-    var selectedProvider: String? {
-        store.selectedConversation?.effectiveProvider
+    var apiScope: MigrationScope {
+        store.migrationScope(to: "openai")
     }
 
-    var apiCandidateCount: Int {
-        store.candidateConversationIDs(to: "openai").count
-    }
-
-    var officialCandidateCount: Int {
-        store.candidateConversationIDs(to: "custom").count
+    var officialScope: MigrationScope {
+        store.migrationScope(to: "custom")
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline) {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("一键转换")
+                    Text("Codex 聊天记录转换")
                         .font(.system(size: 20, weight: .semibold))
-                    Text("勾选多条后批量转换；不勾选时只转换当前选中会话。")
+                    Text(store.checkedCount > 0 ? "勾选后只转移选中的会话。" : "未勾选时默认转移当前列表里的全部可转移会话。")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                 }
@@ -820,7 +798,7 @@ struct ConversionPanel: View {
                 Spacer()
 
                 VStack(alignment: .trailing, spacing: 3) {
-                    Text(store.checkedCount > 0 ? "已勾选" : "当前会话")
+                    Text(store.checkedCount > 0 ? "已勾选" : "默认")
                         .font(.caption)
                         .foregroundStyle(.secondary)
                     Text(store.checkedProviderSummary)
@@ -831,15 +809,15 @@ struct ConversionPanel: View {
 
             HStack(spacing: 10) {
                 DirectionButton(
-                    title: "API → 官方",
-                    subtitle: apiCandidateCount > 0 ? "\(apiCandidateCount) 条转到官方" : "没有可转换的 API 会话",
+                    title: apiScope.usesSelection ? "转移已选 \(apiScope.conversationIDs.count) 条 → 官方" : "转移全部 API → 官方",
+                    subtitle: apiScope.conversationIDs.isEmpty ? "没有可转换的 API 会话" : "\(apiScope.conversationIDs.count) 条转到官方",
                     icon: "arrow.right.circle.fill",
                     prominent: true,
-                    disabled: apiCandidateCount == 0
+                    disabled: apiScope.conversationIDs.isEmpty
                 ) {
                     confirmMigration(
-                        title: "把 \(apiCandidateCount) 条会话转换到官方？",
-                        message: "会自动备份本机聊天记录。操作前请完全退出 Codex。",
+                        title: "\(apiScope.usesSelection ? "把已选" : "把全部 API") \(apiScope.conversationIDs.count) 条会话转换到官方？",
+                        message: migrationWarningText(count: apiScope.conversationIDs.count),
                         confirmTitle: "转换到官方"
                     ) {
                         store.migrateSelection(to: "openai")
@@ -847,71 +825,52 @@ struct ConversionPanel: View {
                 }
 
                 DirectionButton(
-                    title: "官方 → API",
-                    subtitle: officialCandidateCount > 0 ? "\(officialCandidateCount) 条转到 API" : "没有可转换的官方会话",
+                    title: officialScope.usesSelection ? "转移已选 \(officialScope.conversationIDs.count) 条 → API" : "转移全部官方 → API",
+                    subtitle: officialScope.conversationIDs.isEmpty ? "没有可转换的官方会话" : "\(officialScope.conversationIDs.count) 条转到 API",
                     icon: "arrow.left.circle",
                     prominent: false,
-                    disabled: officialCandidateCount == 0
+                    disabled: officialScope.conversationIDs.isEmpty
                 ) {
                     confirmMigration(
-                        title: "把 \(officialCandidateCount) 条会话转换到 API？",
-                        message: "会自动备份本机聊天记录。操作前请完全退出 Codex。",
+                        title: "\(officialScope.usesSelection ? "把已选" : "把全部官方") \(officialScope.conversationIDs.count) 条会话转换到 API？",
+                        message: migrationWarningText(count: officialScope.conversationIDs.count),
                         confirmTitle: "转换到 API"
                     ) {
                         store.migrateSelection(to: "custom")
                     }
                 }
 
-                VStack(spacing: 8) {
-                    BatchButton(
-                        title: "全部 API → 官方",
-                        count: store.providerCount("custom"),
-                        disabled: store.providerCount("custom") == 0
-                    ) {
-                        confirmMigration(
-                            title: "把全部 API 会话转换到官方？",
-                            message: "共 \(store.providerCount("custom")) 条。会自动备份。操作前请完全退出 Codex。",
-                            confirmTitle: "全部转官方"
+                if store.checkedCount > 0 {
+                    VStack(spacing: 8) {
+                        BatchButton(
+                            title: "删除已勾选",
+                            count: store.checkedCount,
+                            disabled: false,
+                            destructive: true
                         ) {
-                            store.migrateAll(from: "custom", to: "openai")
+                            confirmMigration(
+                                title: "删除 \(store.checkedCount) 条会话？",
+                                message: "会先自动备份，再从本机列表和记录中移除。操作前请完全退出 Codex，并确认没有正在运行的任务。",
+                                confirmTitle: "删除会话"
+                            ) {
+                                store.deleteSelection()
+                            }
                         }
                     }
-
-                    BatchButton(
-                        title: "全部官方 → API",
-                        count: store.providerCount("openai"),
-                        disabled: store.providerCount("openai") == 0
-                    ) {
-                        confirmMigration(
-                            title: "把全部官方会话转换到 API？",
-                            message: "共 \(store.providerCount("openai")) 条。会自动备份。操作前请完全退出 Codex。",
-                            confirmTitle: "全部转 API"
-                        ) {
-                            store.migrateAll(from: "openai", to: "custom")
-                        }
-                    }
-
-                    BatchButton(
-                        title: store.checkedCount > 0 ? "删除已勾选" : "删除当前会话",
-                        count: store.checkedCount > 0 ? store.checkedCount : min(store.conversations.count, 1),
-                        disabled: store.conversations.isEmpty,
-                        destructive: true
-                    ) {
-                        let count = store.checkedCount > 0 ? store.checkedCount : 1
-                        confirmMigration(
-                            title: "删除 \(count) 条会话？",
-                            message: "会先自动备份，再删除会话文件、列表索引和数据库记录。操作前请完全退出 Codex。",
-                            confirmTitle: "删除会话"
-                        ) {
-                            store.deleteSelection()
-                        }
-                    }
+                    .frame(width: 150)
                 }
-                .frame(width: 190)
             }
         }
         .padding(16)
         .background(Color(nsColor: .windowBackgroundColor))
+    }
+
+    private func migrationWarningText(count: Int) -> String {
+        """
+        将转换 \(count) 条会话，并在操作前自动备份。
+
+        请先完全退出 Codex，并确认没有正在运行的任务。转换完成后重新打开 Codex，列表才会刷新。
+        """
     }
 
     private func confirmMigration(title: String, message: String, confirmTitle: String, action: () -> Void) {
@@ -945,8 +904,12 @@ struct DirectionButton: View {
                 VStack(alignment: .leading, spacing: 3) {
                     Text(title)
                         .font(.system(size: 18, weight: .semibold))
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.82)
                     Text(subtitle)
                         .font(.caption)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.85)
                         .foregroundStyle(prominent ? Color.white.opacity(0.72) : Color.secondary)
                 }
                 Spacer()
@@ -1016,7 +979,7 @@ struct ConversationListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 10) {
+                    LazyVStack(alignment: .leading, spacing: 8) {
                         ForEach(store.conversationGroups) { group in
                             ConversationGroupView(group: group, store: store)
                         }
@@ -1038,7 +1001,7 @@ struct ListHeaderView: View {
                 HStack {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
-                    TextField("搜索标题、会话 ID 或项目路径", text: $store.searchText)
+                    TextField("搜索标题、会话编号或项目", text: $store.searchText)
                         .textFieldStyle(.plain)
                 }
                 .padding(8)
@@ -1099,7 +1062,7 @@ struct ConversationGroupView: View {
             .padding(.top, 6)
             .help(group.path)
 
-            VStack(spacing: 2) {
+            VStack(spacing: 1) {
                 ForEach(group.conversations) { conversation in
                     ConversationRowView(
                         conversation: conversation,
@@ -1122,50 +1085,42 @@ struct ConversationRowView: View {
     let select: () -> Void
 
     var body: some View {
-        Button(action: select) {
-            HStack(spacing: 9) {
-                Button(action: toggleChecked) {
-                    Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                        .font(.system(size: 16, weight: .semibold))
-                        .foregroundStyle(checked ? Color.black : Color.secondary)
-                        .frame(width: 20, height: 20)
-                }
-                .buttonStyle(.plain)
-                .help(checked ? "取消勾选" : "勾选会话")
+        HStack(spacing: 9) {
+            Button(action: toggleChecked) {
+                Image(systemName: checked ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(checked ? Color.black : Color.secondary)
+                    .frame(width: 20, height: 20)
+            }
+            .buttonStyle(.plain)
+            .help(checked ? "取消勾选" : "勾选会话")
 
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(conversation.title)
-                            .font(.system(size: 14, weight: selected ? .semibold : .medium))
-                            .lineLimit(1)
-
-                        SourcePill(sourceKind: conversation.sourceKind)
-                        ProviderPill(provider: conversation.effectiveProvider)
-                    }
-
-                    Text(conversation.projectPath ?? conversation.id)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
+            Button(action: select) {
+                HStack(spacing: 9) {
+                    Text(conversation.title)
+                        .font(.system(size: 14, weight: selected ? .semibold : .medium))
                         .lineLimit(1)
-                }
 
-                Spacer(minLength: 8)
+                    Spacer(minLength: 8)
 
-                VStack(alignment: .trailing, spacing: 5) {
+                    SourcePill(sourceKind: conversation.sourceKind)
+                    ProviderPill(provider: conversation.effectiveProvider)
                     Text(RelativeTimeText.string(from: conversation.lastUpdatedAt))
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .monospacedDigit()
+                        .frame(width: 46, alignment: .trailing)
                     StatusBadge(status: conversation.status)
                 }
+                .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 8)
-            .frame(height: 54)
-            .background(selected ? Color.black.opacity(0.08) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
         }
-        .buttonStyle(.plain)
+        .padding(.horizontal, 8)
+        .frame(height: 42)
+        .background(selected ? Color.black.opacity(0.08) : Color.clear)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
     }
 }
 
@@ -1197,51 +1152,46 @@ struct InspectorPanel: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     VStack(alignment: .leading, spacing: 8) {
-                        Text("会话信息")
-                            .font(.system(size: 20, weight: .semibold))
+                        HStack {
+                            Text("会话详情")
+                                .font(.system(size: 20, weight: .semibold))
+                            Spacer()
+                            Button {
+                                store.closeInspector()
+                            } label: {
+                                Image(systemName: "xmark")
+                            }
+                            .buttonStyle(.plain)
+                            .help("关闭详情")
+                        }
+                        Text(conversation.title)
+                            .font(.system(size: 14, weight: .medium))
+                            .lineLimit(2)
                         HStack {
                             StatusBadge(status: conversation.status)
                             SourcePill(sourceKind: conversation.sourceKind)
                             ProviderPill(provider: conversation.effectiveProvider)
-                            Text(shortID(conversation.id))
-                                .font(.system(.caption, design: .monospaced))
-                                .foregroundStyle(.secondary)
                         }
                     }
 
-                    DetailSection("归属") {
-                        DetailRow("当前归属", ProviderText.name(conversation.effectiveProvider))
-                        DetailRow("数据库归属", ProviderText.name(conversation.databaseProvider))
-                        DetailRow("文件归属", ProviderText.name(conversation.sessionProvider))
+                    DetailSection("基础信息") {
+                        DetailRow("当前位置", ProviderText.name(conversation.effectiveProvider))
+                        DetailRow("使用方式", SourceText.name(conversation.sourceKind))
+                        DetailRow("项目路径", conversation.projectPath ?? "未知")
+                        DetailRow("更新时间", RelativeTimeText.string(from: conversation.lastUpdatedAt))
                     }
 
                     DetailSection("标识") {
-                        DetailRow("会话 ID", conversation.id, copyable: true)
-                        DetailRow("使用方式", SourceText.name(conversation.sourceKind))
-                        DetailRow("项目路径", conversation.projectPath ?? "未知")
+                        DetailRow("会话编号", conversation.id, copyable: true)
                         DetailRow("归档状态", conversation.isArchived ? "已归档" : "未归档")
-                    }
-
-                    DetailSection("文件") {
-                        DetailRow("Codex 目录", store.root.path)
-                        DetailRow("记录文件", conversation.sessionFilePath?.path ?? "未找到")
                     }
 
                     DetailSection("操作") {
                         VStack(alignment: .leading, spacing: 10) {
-                            HStack {
-                                Button {
-                                    copy(conversation.id)
-                                } label: {
-                                    Label("复制 ID", systemImage: "doc.on.doc")
-                                }
-
-                                Button {
-                                    reveal(conversation.sessionFilePath ?? store.root)
-                                } label: {
-                                    Label("在访达中显示", systemImage: "finder")
-                                }
-                                .disabled(conversation.sessionFilePath == nil)
+                            Button {
+                                copy(conversation.id)
+                            } label: {
+                                Label("复制会话编号", systemImage: "doc.on.doc")
                             }
 
                             Button {
@@ -1270,14 +1220,10 @@ struct InspectorPanel: View {
         NSPasteboard.general.setString(value, forType: .string)
     }
 
-    private func reveal(_ url: URL) {
-        NSWorkspace.shared.activateFileViewerSelecting([url])
-    }
-
     private func confirmDelete(_ conversation: Conversation) {
         let alert = NSAlert()
         alert.messageText = "删除这条会话？"
-        alert.informativeText = "会先自动备份，再删除会话文件、列表索引和数据库记录。操作前请完全退出 Codex。"
+        alert.informativeText = "会先自动备份，再从本机列表和记录中移除。操作前请完全退出 Codex，并确认没有正在运行的任务。"
         alert.addButton(withTitle: "删除会话")
         alert.addButton(withTitle: "取消")
         alert.alertStyle = .warning
@@ -1286,9 +1232,6 @@ struct InspectorPanel: View {
         }
     }
 
-    private func shortID(_ id: String) -> String {
-        String(id.prefix(8))
-    }
 }
 
 struct DetailSection<Content: View>: View {
@@ -1512,10 +1455,6 @@ struct ConversationGroup: Identifiable {
 }
 
 extension Conversation {
-    var effectiveProvider: String? {
-        sessionProvider ?? databaseProvider
-    }
-
     var sourceKind: String {
         switch source {
         case "exec", "cli", "terminal":
@@ -1536,7 +1475,7 @@ extension ConversationStatus {
         case .providerMismatch:
             return "归属不一致"
         case .missingDatabaseRow:
-            return "缺少数据库"
+            return "记录不完整"
         case .missingSessionFile:
             return "缺少文件"
         case .unreadableSessionFile:
