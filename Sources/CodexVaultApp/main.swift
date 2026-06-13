@@ -332,6 +332,39 @@ final class VaultStore: ObservableObject {
         }
     }
 
+    private func performDeletion(ids: [String], scopeName: String) {
+        guard !ids.isEmpty else {
+            errorMessage = "没有可删除的会话。"
+            infoMessage = nil
+            return
+        }
+
+        isScanning = true
+        scanMode = "正在删除"
+        errorMessage = nil
+        infoMessage = nil
+
+        let root = self.root
+        let engine = self.migrationEngine
+        Task {
+            do {
+                let report = try await Task.detached(priority: .userInitiated) {
+                    try engine.delete(root: root, conversationIDs: ids)
+                }.value
+                checkedConversationIDs.subtract(ids)
+                if ids.contains(selectedConversationID ?? "") {
+                    selectedConversationID = nil
+                }
+                infoMessage = "\(scopeName)已删除，共 \(report.deletedCount) 条。清理文件 \(report.deletedSessionFileCount) 个、索引 \(report.deletedIndexEntryCount) 条、数据库 \(report.deletedDatabaseRowCount) 条。已自动备份。"
+                await refreshQuick()
+            } catch {
+                errorMessage = readableMessage(error)
+                scanMode = "列表模式"
+                isScanning = false
+            }
+        }
+    }
+
     private func selectedConversationIDsForAction() -> [String] {
         let checked = checkedIDsInCurrentList()
         if !checked.isEmpty {
@@ -364,6 +397,16 @@ final class VaultStore: ObservableObject {
     func migrateSelection(to targetProvider: String) {
         let ids = candidateConversationIDs(to: targetProvider)
         performMigration(ids: ids, targetProvider: targetProvider, scopeName: selectedScopeName(to: targetProvider))
+    }
+
+    func deleteSelection() {
+        let ids = selectedConversationIDsForAction()
+        let scopeName = checkedCount > 0 ? "已勾选 \(ids.count) 条会话" : "当前会话"
+        performDeletion(ids: ids, scopeName: scopeName)
+    }
+
+    func deleteConversation(_ conversation: Conversation) {
+        performDeletion(ids: [conversation.id], scopeName: "当前会话")
     }
 
     private func keepSelection(in scan: ScanResult) {
@@ -411,11 +454,11 @@ final class VaultStore: ObservableObject {
                 return "当前 Codex 数据库结构暂不支持。"
             case .codexIsRunning(let processes):
                 let details = processes.map { "\($0.id)：\($0.command)" }.joined(separator: "\n")
-                return "请先完全退出 Codex，再转换聊天记录。\n\(details)"
+                return "请先完全退出 Codex，再操作聊天记录。\n\(details)"
             case .backupFailed(let message):
                 return "备份失败：\(message)"
             case .migrationFailed(let message):
-                return "转换失败：\(message)"
+                return "操作失败：\(message)"
             }
         }
         return error.localizedDescription
@@ -450,7 +493,7 @@ struct MainView: View {
 
                 Divider()
 
-                InspectorPanel(conversation: store.selectedConversation, root: store.root)
+                InspectorPanel(store: store)
                     .frame(width: 340)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -847,6 +890,22 @@ struct ConversionPanel: View {
                             store.migrateAll(from: "openai", to: "custom")
                         }
                     }
+
+                    BatchButton(
+                        title: store.checkedCount > 0 ? "删除已勾选" : "删除当前会话",
+                        count: store.checkedCount > 0 ? store.checkedCount : min(store.conversations.count, 1),
+                        disabled: store.conversations.isEmpty,
+                        destructive: true
+                    ) {
+                        let count = store.checkedCount > 0 ? store.checkedCount : 1
+                        confirmMigration(
+                            title: "删除 \(count) 条会话？",
+                            message: "会先自动备份，再删除会话文件、列表索引和数据库记录。操作前请完全退出 Codex。",
+                            confirmTitle: "删除会话"
+                        ) {
+                            store.deleteSelection()
+                        }
+                    }
                 }
                 .frame(width: 190)
             }
@@ -861,6 +920,9 @@ struct ConversionPanel: View {
         alert.informativeText = message
         alert.addButton(withTitle: confirmTitle)
         alert.addButton(withTitle: "取消")
+        if confirmTitle.contains("删除") {
+            alert.alertStyle = .warning
+        }
         if alert.runModal() == .alertFirstButtonReturn {
             action()
         }
@@ -909,6 +971,7 @@ struct BatchButton: View {
     let title: String
     let count: Int
     let disabled: Bool
+    var destructive = false
     let action: () -> Void
 
     var body: some View {
@@ -924,10 +987,11 @@ struct BatchButton: View {
             }
             .padding(.horizontal, 11)
             .frame(height: 30)
-            .background(Color(nsColor: .controlBackgroundColor))
+            .background(destructive ? Color.red.opacity(0.06) : Color(nsColor: .controlBackgroundColor))
+            .foregroundStyle(destructive ? Color.red : Color.primary)
             .overlay(
                 RoundedRectangle(cornerRadius: 8)
-                    .stroke(Color.black.opacity(0.08), lineWidth: 1)
+                    .stroke(destructive ? Color.red.opacity(0.25) : Color.black.opacity(0.08), lineWidth: 1)
             )
             .clipShape(RoundedRectangle(cornerRadius: 8))
             .opacity(disabled ? 0.38 : 1)
@@ -1067,7 +1131,7 @@ struct ConversationRowView: View {
                         .frame(width: 20, height: 20)
                 }
                 .buttonStyle(.plain)
-                .help(checked ? "取消勾选" : "勾选转移")
+                .help(checked ? "取消勾选" : "勾选会话")
 
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 6) {
@@ -1122,8 +1186,11 @@ struct MetricView: View {
 }
 
 struct InspectorPanel: View {
-    let conversation: Conversation?
-    let root: URL
+    @ObservedObject var store: VaultStore
+
+    var conversation: Conversation? {
+        store.selectedConversation
+    }
 
     var body: some View {
         if let conversation {
@@ -1156,24 +1223,35 @@ struct InspectorPanel: View {
                     }
 
                     DetailSection("文件") {
-                        DetailRow("Codex 目录", root.path)
+                        DetailRow("Codex 目录", store.root.path)
                         DetailRow("记录文件", conversation.sessionFilePath?.path ?? "未找到")
                     }
 
                     DetailSection("操作") {
-                        HStack {
-                            Button {
-                                copy(conversation.id)
-                            } label: {
-                                Label("复制 ID", systemImage: "doc.on.doc")
+                        VStack(alignment: .leading, spacing: 10) {
+                            HStack {
+                                Button {
+                                    copy(conversation.id)
+                                } label: {
+                                    Label("复制 ID", systemImage: "doc.on.doc")
+                                }
+
+                                Button {
+                                    reveal(conversation.sessionFilePath ?? store.root)
+                                } label: {
+                                    Label("在访达中显示", systemImage: "finder")
+                                }
+                                .disabled(conversation.sessionFilePath == nil)
                             }
 
                             Button {
-                                reveal(conversation.sessionFilePath ?? root)
+                                confirmDelete(conversation)
                             } label: {
-                                Label("在访达中显示", systemImage: "finder")
+                                Label("删除这条会话", systemImage: "trash")
                             }
-                            .disabled(conversation.sessionFilePath == nil)
+                            .buttonStyle(.bordered)
+                            .controlSize(.regular)
+                            .tint(.red)
                         }
                     }
                 }
@@ -1194,6 +1272,18 @@ struct InspectorPanel: View {
 
     private func reveal(_ url: URL) {
         NSWorkspace.shared.activateFileViewerSelecting([url])
+    }
+
+    private func confirmDelete(_ conversation: Conversation) {
+        let alert = NSAlert()
+        alert.messageText = "删除这条会话？"
+        alert.informativeText = "会先自动备份，再删除会话文件、列表索引和数据库记录。操作前请完全退出 Codex。"
+        alert.addButton(withTitle: "删除会话")
+        alert.addButton(withTitle: "取消")
+        alert.alertStyle = .warning
+        if alert.runModal() == .alertFirstButtonReturn {
+            store.deleteConversation(conversation)
+        }
     }
 
     private func shortID(_ id: String) -> String {

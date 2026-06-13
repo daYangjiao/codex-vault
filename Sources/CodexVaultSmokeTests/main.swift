@@ -7,6 +7,7 @@ struct CodexVaultSmokeTests {
     static func main() throws {
         let root = try makeFixtureRoot()
         defer { try? FileManager.default.removeItem(at: root) }
+        let indexURL = root.appendingPathComponent("session_index.jsonl")
 
         let sessions = try SessionScanner().scan(root: root)
         try expect(sessions.count == 3, "expected 3 session records")
@@ -43,6 +44,24 @@ struct CodexVaultSmokeTests {
         try expect(migrated?.databaseProvider == "openai", "expected database provider update")
         try expect(migrated?.status == .ok, "expected migrated conversation to be OK")
 
+        try expectLargePayloadLineSurvivesMigration(root: root, backupsRoot: backupsRoot)
+
+        let deletion = try migration.delete(
+            root: root,
+            conversationIDs: ["11111111-1111-4111-8111-111111111111"],
+            skipProcessCheck: true
+        )
+        try expect(deletion.deletedCount == 1, "expected one deleted conversation")
+        try expect(deletion.deletedSessionFileCount == 1, "expected one deleted session file")
+        try expect(FileManager.default.fileExists(atPath: deletion.backup.backupDirectory.path), "expected deletion backup directory")
+
+        let deletedScan = try CodexVaultScanner().scan(root: root)
+        try expect(!deletedScan.conversations.contains { $0.id == "11111111-1111-4111-8111-111111111111" }, "deleted conversation should not scan")
+        let deletedSessionURL = root.appendingPathComponent("sessions/2026/06/12/rollout-2026-06-12T10-00-00-11111111-1111-4111-8111-111111111111.jsonl")
+        try expect(!FileManager.default.fileExists(atPath: deletedSessionURL.path), "deleted session file should be removed")
+        let indexText = try String(contentsOf: indexURL, encoding: .utf8)
+        try expect(!indexText.contains("11111111-1111-4111-8111-111111111111"), "deleted conversation should be removed from session index")
+
         print("CodexVaultSmokeTests passed")
     }
 
@@ -75,7 +94,44 @@ struct CodexVaultSmokeTests {
             {"timestamp":"2026-06-12T12:00:05.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_text","text":"Archived conversation"}]}}
             """
         )
+        try write(
+            root.appendingPathComponent("session_index.jsonl"),
+            """
+            {"id":"11111111-1111-4111-8111-111111111111","thread_name":"Build the scanner","updated_at":"2026-06-12T10:00:05.000Z"}
+            {"id":"22222222-2222-4222-8222-222222222222","thread_name":"Migrate this conversation","updated_at":"2026-06-12T11:00:05.000Z"}
+            {"id":"33333333-3333-4333-8333-333333333333","thread_name":"Archived conversation","updated_at":"2026-06-12T12:00:05.000Z"}
+            """
+        )
         return root
+    }
+
+    private static func expectLargePayloadLineSurvivesMigration(root: URL, backupsRoot: URL) throws {
+        let fileURL = root.appendingPathComponent("sessions/2026/06/12/rollout-2026-06-12T11-00-00-22222222-2222-4222-8222-222222222222.jsonl")
+        let imagePayloadLine = Data("""
+        {"timestamp":"2026-06-12T11:00:10.000Z","type":"response_item","payload":{"type":"message","role":"user","content":[{"type":"input_image","image_url":"data:image/png;base64,\(String(repeating: "A", count: 1_200_000))"}]}}
+        """.utf8)
+        let corruptPayloadLine = Data([0xff, 0x00, 0x61, 0x62, 0x63, 0x0a])
+        let handle = try FileHandle(forWritingTo: fileURL)
+        try handle.seekToEnd()
+        try handle.write(contentsOf: imagePayloadLine)
+        try handle.write(contentsOf: Data("\n".utf8))
+        try handle.write(contentsOf: corruptPayloadLine)
+        try handle.close()
+
+        let records = try SessionScanner().scan(root: root)
+        let migration = MigrationEngine(backupManager: BackupManager(backupsRoot: backupsRoot))
+        _ = try migration.migrate(
+            root: root,
+            conversationIDs: ["22222222-2222-4222-8222-222222222222"],
+            targetProvider: "custom",
+            skipProcessCheck: true
+        )
+
+        let data = try Data(contentsOf: fileURL)
+        try expect(data.range(of: imagePayloadLine) != nil, "image payload line should remain byte-for-byte intact")
+        try expect(data.range(of: corruptPayloadLine) != nil, "unparseable payload line should remain byte-for-byte intact")
+        let migrated = try SessionScanner().scan(root: root)
+        try expect(records.count == migrated.count, "large payload migration should not change session count")
     }
 
     private static func write(_ url: URL, _ text: String) throws {

@@ -26,15 +26,16 @@
 - 支持选中会话转换。
 - 支持全部 API 会话转官方。
 - 支持全部官方会话转 API。
+- 支持删除当前会话或已勾选会话。
 - 需要时同步校验 session JSONL 文件。
 - 转换前自动备份。
+- 删除前自动备份，并清理会话文件、`session_index.jsonl` 和 `state_5.sqlite`。
 - Codex 或 `codex app-server` 运行中拒绝写入。
 - 恢复最近一次本地备份。
 
 ## 暂缓
 
 - 完整聊天内容浏览。
-- 多选表格批量转换。
 - 备份历史选择器。
 - SQLite 修复向导。
 - 签名和 notarization。
@@ -42,3 +43,5 @@
 ## 安全规则
 
 任何写入真实 `.codex` 数据前，必须先创建备份，并确认 Codex 已完全退出。`state_5.sqlite` 不是唯一事实来源，转换必须同步更新 session JSONL 的 `session_meta.model_provider`。
+
+图片多的会话按行流式迁移，只改 `session_meta` 元数据行，不展开、不解析、不重写图片/base64 内容行，降低大文件内存占用和内容损坏风险。

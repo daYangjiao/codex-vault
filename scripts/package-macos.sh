@@ -40,7 +40,7 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 <plist version="1.0">
 <dict>
   <key>CFBundleDevelopmentRegion</key>
-  <string>zh_CN</string>
+  <string>zh-CN</string>
   <key>CFBundleDisplayName</key>
   <string>Codex 对话管家</string>
   <key>CFBundleExecutable</key>
@@ -53,14 +53,20 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
   <string>6.0</string>
   <key>CFBundleName</key>
   <string>Codex 对话管家</string>
+  <key>CFBundleSpokenName</key>
+  <string>Codex 对话管家</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
-  <string>0.1.2</string>
+  <string>0.1.3</string>
   <key>CFBundleVersion</key>
-  <string>3</string>
+  <string>4</string>
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.utilities</string>
   <key>LSMinimumSystemVersion</key>
   <string>14.0</string>
+  <key>LSUIElement</key>
+  <false/>
   <key>NSHighResolutionCapable</key>
   <true/>
   <key>NSHumanReadableCopyright</key>
@@ -68,6 +74,8 @@ cat > "$CONTENTS_DIR/Info.plist" <<'PLIST'
 </dict>
 </plist>
 PLIST
+
+printf 'APPL????' > "$CONTENTS_DIR/PkgInfo"
 
 cat > "$RESOURCES_DIR/README.txt" <<'TEXT'
 Codex 对话管家是一个本机 Codex 聊天记录转换工具。

@@ -177,6 +177,28 @@ public struct MigrationReport: Sendable {
     }
 }
 
+public struct DeletionReport: Sendable {
+    public let deletedCount: Int
+    public let deletedDatabaseRowCount: Int
+    public let deletedSessionFileCount: Int
+    public let deletedIndexEntryCount: Int
+    public let backup: BackupRecord
+
+    public init(
+        deletedCount: Int,
+        deletedDatabaseRowCount: Int,
+        deletedSessionFileCount: Int,
+        deletedIndexEntryCount: Int,
+        backup: BackupRecord
+    ) {
+        self.deletedCount = deletedCount
+        self.deletedDatabaseRowCount = deletedDatabaseRowCount
+        self.deletedSessionFileCount = deletedSessionFileCount
+        self.deletedIndexEntryCount = deletedIndexEntryCount
+        self.backup = backup
+    }
+}
+
 public struct RunningProcess: Identifiable, Hashable, Sendable {
     public let id: Int32
     public let command: String

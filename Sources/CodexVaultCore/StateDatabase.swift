@@ -78,6 +78,57 @@ public struct StateDatabase: Sendable {
         }
     }
 
+    public func deleteThreads(databaseURL: URL, conversationIDs: [String]) throws -> Int {
+        guard !conversationIDs.isEmpty else {
+            return 0
+        }
+        guard FileManager.default.fileExists(atPath: databaseURL.path) else {
+            return 0
+        }
+
+        var db: OpaquePointer?
+        let flags = SQLITE_OPEN_READWRITE | SQLITE_OPEN_FULLMUTEX
+        guard sqlite3_open_v2(databaseURL.path, &db, flags, nil) == SQLITE_OK else {
+            let message = db.map { String(cString: sqlite3_errmsg($0)) } ?? "unknown sqlite error"
+            if db != nil {
+                sqlite3_close(db)
+            }
+            throw CodexVaultError.sqliteOpenFailed(message)
+        }
+        defer { sqlite3_close(db) }
+
+        let columns = try tableColumns(db, tableName: "threads")
+        guard columns.contains("id") else {
+            throw CodexVaultError.unsupportedDatabaseSchema
+        }
+
+        var deleted = 0
+        try exec(db, "BEGIN IMMEDIATE TRANSACTION")
+        do {
+            let sql = "DELETE FROM threads WHERE id = ?"
+            var statement: OpaquePointer?
+            guard sqlite3_prepare_v2(db, sql, -1, &statement, nil) == SQLITE_OK else {
+                throw CodexVaultError.sqlitePrepareFailed(String(cString: sqlite3_errmsg(db)))
+            }
+            defer { sqlite3_finalize(statement) }
+
+            for id in Set(conversationIDs) {
+                sqlite3_reset(statement)
+                sqlite3_clear_bindings(statement)
+                sqlite3_bind_text(statement, 1, id, -1, SQLITE_TRANSIENT)
+                guard sqlite3_step(statement) == SQLITE_DONE else {
+                    throw CodexVaultError.sqlitePrepareFailed(String(cString: sqlite3_errmsg(db)))
+                }
+                deleted += Int(sqlite3_changes(db))
+            }
+            try exec(db, "COMMIT")
+        } catch {
+            try? exec(db, "ROLLBACK")
+            throw error
+        }
+        return deleted
+    }
+
     private func hasThreadsTable(_ db: OpaquePointer?) throws -> Bool {
         let sql = "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'threads' LIMIT 1"
         var statement: OpaquePointer?

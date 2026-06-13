@@ -16,8 +16,10 @@
 - 支持单击勾选多条会话后批量转换。
 - 支持选中会话 `API → 官方`、`官方 → API`。
 - 支持全部 API 会话转官方、全部官方会话转 API。
+- 支持删除当前会话或已勾选会话。
 - 需要时可同步校验 session JSONL 文件。
 - 转换前自动创建本地备份。
+- 删除前自动创建本地备份，并同步清理会话文件、列表索引和 SQLite 记录。
 - Codex 或 `codex app-server` 正在运行时拒绝写入，避免被运行中的 Codex 覆盖。
 - 可恢复最近一次备份。
 
@@ -27,6 +29,7 @@
 swift run CodexVaultSmokeTests
 swift build -c release --product CodexVault
 ./scripts/package-macos.sh
+./scripts/install-macos.sh
 ```
 
 应用包输出到：
@@ -51,7 +54,9 @@ dist/Codex-Vault.dmg
 ~/.codex/state_5.sqlite
 ```
 
-执行转换或恢复前，会检查 Codex 是否完全退出。转换会同时更新 session JSONL 的 `session_meta.model_provider` 和 SQLite 里的 provider 字段，并在写入前自动备份。
+执行转换、删除或恢复前，会检查 Codex 是否完全退出。转换会同时更新 session JSONL 的 `session_meta.model_provider` 和 SQLite 里的 provider 字段，并在写入前自动备份。
+
+图片多的会话不会展开或重写完整聊天内容。转换时应用按行流式处理 JSONL，只改 `session_meta` 元数据行，图片/base64 等内容行会保持原样。
 
 备份目录：
 
