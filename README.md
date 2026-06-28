@@ -28,41 +28,46 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 - Codex 正在运行时拒绝写入，避免影响进行中的任务。
 - 可一键恢复最近一次备份。
 
-## 安装与构建
+## 安装
 
-> 需要 macOS 14 及以上，并已安装 Xcode 命令行工具（`xcode-select --install`）。
-> 目前通过源码构建分发，暂未提供已签名/公证的安装包。
+> 需要 macOS 14 及以上。
+
+### 方式一：一行命令安装（推荐）
+
+在「终端」粘贴运行，自动下载、安装并打开：
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
+```
+
+脚本用 `curl` 下载安装包，不会被打上「隔离」标记，因此装完可以直接打开，**无需 Apple 签名/公证**。
+
+### 方式二：从 Release 下载 DMG
+
+到 [Releases](https://github.com/daYangjiao/codex-vault/releases) 下载 `Codex-Vault.dmg`，拖入「应用程序」。由于应用未做公证，浏览器下载会带「隔离」标记，首次打开若被拦，二选一：
+
+- 「系统设置 → 隐私与安全性」往下找到提示，点「仍要打开」；或
+- 终端执行 `xattr -cr "/Applications/Codex 对话管家.app"` 后再打开。
+
+### 方式三：源码构建（开发者 / AI 代理）
+
+需要 Xcode 命令行工具（`xcode-select --install`）。本地构建的程序没有「隔离」标记，`swift run` 可直接运行：
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
 cd codex-vault
 
-# 1) 自检（验证扫描与迁移核心逻辑）
-swift run CodexVaultSmokeTests
+swift run CodexVaultSmokeTests          # 自检：验证扫描与迁移核心逻辑
+swift run CodexVault                     # 直接运行（开发调试）
 
-# 2) 构建 Release 版可执行文件
-swift build -c release --product CodexVault
-
-# 3) 打包成 .app 和 .dmg
+# 或打包成 .app/.dmg 并安装到「应用程序」
 ./scripts/package-macos.sh
-
-# 4) 安装到「应用程序」目录
 ./scripts/install-macos.sh
 ```
 
-应用包输出到：
+应用包输出到 `dist/Codex 对话管家.app`，DMG 输出到 `dist/Codex-Vault.dmg`。
 
-```text
-dist/Codex 对话管家.app
-```
-
-DMG 输出到：
-
-```text
-dist/Codex-Vault.dmg
-```
-
-由于应用使用临时（ad-hoc）签名、未做公证，首次打开若被 Gatekeeper 拦截，可在「系统设置 → 隐私与安全性」中点「仍要打开」，或对 `.app` 执行 `xattr -cr`。`install-macos.sh` 在本机构建安装时已自动处理这一步。
+> **关于「下载双击就能开」**：要让浏览器下载的 `.app` 完全无提示打开，需要 Apple 开发者账号做签名+公证。本项目不依赖该账号，所以推荐用方式一（一行命令）或方式三（源码构建）——这两种途径下载的程序不带「隔离」标记，可以干净启动。
 
 ## 安全规则
 
@@ -109,31 +114,46 @@ Codex Desktop groups your history by model source: switch to an API provider and
 - Refuses to write while Codex is running, protecting in-progress tasks.
 - Restore the most recent backup with one click.
 
-## Install & Build
+## Install
 
-> Requires macOS 14+ and the Xcode Command Line Tools (`xcode-select --install`).
-> Currently distributed as source — there is no signed/notarized installer yet.
+> Requires macOS 14+.
+
+### Option 1 — One-line install (recommended)
+
+Paste into Terminal; it downloads, installs, and launches automatically:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
+```
+
+The script downloads via `curl`, which does **not** add the quarantine flag, so the app opens cleanly — no Apple signing/notarization needed.
+
+### Option 2 — Download the DMG from Releases
+
+Grab `Codex-Vault.dmg` from [Releases](https://github.com/daYangjiao/codex-vault/releases) and drag it into /Applications. Since the app is not notarized, a browser download carries the quarantine flag. If the first launch is blocked, either:
+
+- open **System Settings → Privacy & Security** and click **Open Anyway**; or
+- run `xattr -cr "/Applications/Codex 对话管家.app"`, then open it.
+
+### Option 3 — Build from source (developers / AI agents)
+
+Requires the Xcode Command Line Tools (`xcode-select --install`). Locally built binaries have no quarantine flag, so `swift run` just works:
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
 cd codex-vault
 
-# 1) Self-check (verifies scanning and migration core logic)
-swift run CodexVaultSmokeTests
+swift run CodexVaultSmokeTests          # self-check: scanning + migration core logic
+swift run CodexVault                     # run directly (dev)
 
-# 2) Build the release executable
-swift build -c release --product CodexVault
-
-# 3) Package into .app and .dmg
+# or package into .app/.dmg and install into /Applications
 ./scripts/package-macos.sh
-
-# 4) Install into /Applications
 ./scripts/install-macos.sh
 ```
 
 The app bundle is written to `dist/Codex 对话管家.app`; the DMG to `dist/Codex-Vault.dmg`.
 
-The app is ad-hoc signed and not notarized. If Gatekeeper blocks the first launch, allow it under **System Settings → Privacy & Security → Open Anyway**, or run `xattr -cr` on the `.app`. The `install-macos.sh` script handles this automatically for local builds.
+> **On "download and just double-click"**: making a browser-downloaded `.app` launch with zero prompts requires an Apple Developer account for signing + notarization. This project doesn't depend on one, so prefer Option 1 (one-line) or Option 3 (from source) — binaries obtained those ways have no quarantine flag and start cleanly.
 
 ## Safety rules
 
