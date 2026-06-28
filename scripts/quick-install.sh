@@ -3,15 +3,15 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 #
-# 通过 curl 下载 DMG（不会被打上 quarantine 隔离标记），装到「应用程序」后可直接打开，
-# 无需 Apple 开发者签名 / 公证。
-# Downloads the DMG via curl (no quarantine flag), installs into /Applications, and
-# opens cleanly — no Apple Developer signing / notarization required.
+# 通过 curl 下载已编译好的 .app 压缩包（不会被打上 quarantine 隔离标记），解压装到「应用程序」后
+# 自动打开，无需 Apple 开发者签名 / 公证，也无需 Xcode。
+# Downloads a prebuilt .app zip via curl (no quarantine flag), installs into /Applications,
+# and launches it — no Apple Developer signing / notarization and no Xcode required.
 set -euo pipefail
 
 REPO="daYangjiao/codex-vault"
 APP_NAME="Codex 对话管家"
-DMG_URL="https://github.com/$REPO/releases/latest/download/Codex-Vault.dmg"
+ASSET_URL="https://github.com/$REPO/releases/latest/download/Codex-Vault.app.zip"
 TARGET="/Applications/$APP_NAME.app"
 
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -20,30 +20,26 @@ if [[ "$(uname)" != "Darwin" ]]; then
 fi
 
 WORK_DIR="$(mktemp -d)"
-DMG_PATH="$WORK_DIR/Codex-Vault.dmg"
-MOUNT_POINT=""
-
-cleanup() {
-  [[ -n "$MOUNT_POINT" ]] && hdiutil detach "$MOUNT_POINT" -quiet 2>/dev/null || true
-  rm -rf "$WORK_DIR"
-}
+cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
 echo "下载安装包 / Downloading…"
-curl -fL --progress-bar "$DMG_URL" -o "$DMG_PATH"
+curl -fL --progress-bar "$ASSET_URL" -o "$WORK_DIR/app.zip"
 
-echo "挂载 DMG / Mounting…"
-MOUNT_POINT="$(hdiutil attach "$DMG_PATH" -nobrowse -noverify -readonly | grep -o '/Volumes/.*' | head -1)"
-if [[ -z "$MOUNT_POINT" || ! -d "$MOUNT_POINT/$APP_NAME.app" ]]; then
-  echo "在 DMG 中未找到 $APP_NAME.app / app not found in DMG." >&2
+echo "解压 / Extracting…"
+ditto -x -k "$WORK_DIR/app.zip" "$WORK_DIR/out"
+APP_SRC="$WORK_DIR/out/$APP_NAME.app"
+if [[ ! -d "$APP_SRC" ]]; then
+  echo "压缩包中未找到 $APP_NAME.app / app not found in archive." >&2
   exit 1
 fi
 
 echo "安装到「应用程序」/ Installing into /Applications…"
 [[ -d "$TARGET" ]] && rm -rf "$TARGET"
-ditto --noextattr --noqtn "$MOUNT_POINT/$APP_NAME.app" "$TARGET"
+ditto --noextattr --noqtn "$APP_SRC" "$TARGET"
 xattr -cr "$TARGET" 2>/dev/null || true
 
 echo "完成，正在打开 / Done, launching…"
 open "$TARGET"
-echo "$TARGET"
+echo "已安装并打开：$TARGET"
+echo "Installed and launched: $TARGET"
