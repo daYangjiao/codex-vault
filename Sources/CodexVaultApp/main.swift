@@ -100,6 +100,9 @@ final class VaultStore: ObservableObject {
     @Published var infoMessage: String?
     @Published var isScanning = false
     @Published var operationLabel: String?
+    @Published var dialog: DialogModel?
+    /// 上次点击的转换方向（true=转到官方, false=转到 API, nil=未选）。用于高亮被点击的那个方向按钮。
+    @Published var selectedToOfficial: Bool?
     @Published var scanMode = "列表模式"
     @Published var showsInspector = false
 
@@ -110,6 +113,8 @@ final class VaultStore: ObservableObject {
     private let processGuard = ProcessGuard()
     /// 操作进行中的串行闸门（与展示用的 operationLabel 解耦，弹重试框时也不会被释放）。
     private var isOperating = false
+    /// 当前确认弹窗的挂起结果，集中管理以保证只 resume 一次、不泄漏。
+    private var pendingDialogResult: CheckedContinuation<Bool, Never>?
 
     init() {
         self.root = locator.defaultRoot()
@@ -306,38 +311,46 @@ final class VaultStore: ObservableObject {
     /// 备份管理：显示数量与占用大小，可打开文件夹或清空全部。
     func manageBackups() {
         let count = backupManager.listBackups().count
-        let alert = NSAlert()
-        alert.messageText = "备份管理"
-        if count == 0 {
-            alert.informativeText = "暂无备份。"
-            alert.addButton(withTitle: "打开文件夹")
-            alert.addButton(withTitle: "关闭")
-            if alert.runModal() == .alertFirstButtonReturn { openBackupsFolder() }
+        guard count > 0 else {
+            present(DialogModel(
+                title: "备份管理",
+                message: "暂无备份。",
+                systemImage: "archivebox",
+                buttons: [
+                    DialogButton(label: "打开文件夹", role: .normal) { [weak self] in self?.openBackupsFolder() },
+                    DialogButton(label: "关闭", role: .cancel) {}
+                ]
+            ))
             return
         }
-        alert.informativeText = "共 \(count) 个备份，约 \(backupManager.totalSizeText())。自动保留最近 \(backupManager.maxBackups) 个。"
-        alert.addButton(withTitle: "打开文件夹")
-        alert.addButton(withTitle: "清空全部")
-        alert.addButton(withTitle: "关闭")
-        switch alert.runModal() {
-        case .alertFirstButtonReturn:
-            openBackupsFolder()
-        case .alertSecondButtonReturn:
-            let confirm = NSAlert()
-            confirm.alertStyle = .warning
-            confirm.messageText = "清空全部备份？"
-            confirm.informativeText = "将删除全部 \(count) 个本地备份，不可恢复。"
-            confirm.addButton(withTitle: "清空")
-            confirm.addButton(withTitle: "取消")
-            if confirm.runModal() == .alertFirstButtonReturn {
+        present(DialogModel(
+            title: "备份管理",
+            message: "共 \(count) 个备份，约 \(backupManager.totalSizeText())。自动保留最近 \(backupManager.maxBackups) 个。",
+            systemImage: "archivebox",
+            buttons: [
+                DialogButton(label: "打开文件夹", role: .normal) { [weak self] in self?.openBackupsFolder() },
+                DialogButton(label: "清空全部", role: .destructive) { [weak self] in self?.confirmClearBackups(count: count) },
+                DialogButton(label: "关闭", role: .cancel) {}
+            ]
+        ))
+    }
+
+    private func confirmClearBackups(count: Int) {
+        Task { @MainActor in
+            if await ask(
+                title: "清空全部备份？",
+                message: "将删除全部 \(count) 个本地备份，不可恢复。",
+                confirmLabel: "清空",
+                destructive: true,
+                systemImage: "trash.fill",
+                iconTint: .red
+            ) {
                 if backupManager.deleteAllBackups() {
                     infoMessage = "已清空全部备份。"
                 } else {
                     errorMessage = "部分备份未能删除，可在文件夹中手动清理。"
                 }
             }
-        default:
-            break
         }
     }
 
@@ -438,7 +451,14 @@ final class VaultStore: ObservableObject {
             if running.isEmpty {
                 return true
             }
-            if !presentCodexRunningRetry() {
+            let retry = await ask(
+                title: "Codex 尚未关闭",
+                message: "请先完全退出 Codex（包括 VS Code 里的 Codex），再点重试。",
+                confirmLabel: "重试",
+                systemImage: "exclamationmark.triangle.fill",
+                iconTint: .orange
+            )
+            if !retry {
                 return false
             }
         }
@@ -616,14 +636,125 @@ final class VaultStore: ObservableObject {
     }
 
     /// Codex 未关闭时的提示弹窗：只显示一句话，给「重试 / 取消」两个按钮。返回是否点了重试。
-    private func presentCodexRunningRetry() -> Bool {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Codex 尚未关闭"
-        alert.informativeText = "请先完全退出 Codex，再点重试。"
-        alert.addButton(withTitle: "重试")
-        alert.addButton(withTitle: "取消")
-        return alert.runModal() == .alertFirstButtonReturn
+    /// 展示一个无返回值的多按钮弹窗。覆盖时先了结任何挂起的确认，避免 continuation 泄漏。
+    func present(_ model: DialogModel) {
+        pendingDialogResult?.resume(returning: false)
+        pendingDialogResult = nil
+        dialog = model
+    }
+
+    /// 关闭当前弹窗，并（若存在挂起的确认）只 resume 一次。按钮点击、背景点击、被覆盖都走这里。
+    func finishDialog(_ result: Bool) {
+        dialog = nil
+        if let cont = pendingDialogResult {
+            pendingDialogResult = nil
+            cont.resume(returning: result)
+        }
+    }
+
+    /// 异步确认弹窗：返回用户是否点了确认按钮。
+    func ask(
+        title: String,
+        message: String? = nil,
+        confirmLabel: String,
+        cancelLabel: String = "取消",
+        destructive: Bool = false,
+        systemImage: String? = nil,
+        iconTint: Color = Theme.accent1
+    ) async -> Bool {
+        await withCheckedContinuation { (cont: CheckedContinuation<Bool, Never>) in
+            pendingDialogResult?.resume(returning: false)
+            pendingDialogResult = cont
+            dialog = DialogModel(
+                title: title,
+                message: message,
+                systemImage: systemImage,
+                iconTint: iconTint,
+                buttons: [
+                    DialogButton(label: cancelLabel, role: .cancel) { [weak self] in self?.finishDialog(false) },
+                    DialogButton(label: confirmLabel, role: destructive ? .destructive : .primary) { [weak self] in self?.finishDialog(true) }
+                ]
+            )
+        }
+    }
+
+    func requestMigrate(toOfficial: Bool) {
+        let targetProvider = toOfficial ? ProviderCategory.officialID : apiProviderID
+        let scope = migrationScope(to: targetProvider)
+        guard !scope.conversationIDs.isEmpty else { return }
+        selectedToOfficial = toOfficial
+        let count = scope.conversationIDs.count
+        let dirText = toOfficial ? "官方" : "API"
+        Task { @MainActor in
+            if await ask(
+                title: "把\(scope.usesSelection ? "已选" : "全部") \(count) 条会话转换到\(dirText)？",
+                message: "操作前会自动备份。",
+                confirmLabel: "转换到\(dirText)",
+                systemImage: "arrow.left.arrow.right.circle.fill"
+            ) {
+                migrateSelection(to: targetProvider)
+            }
+        }
+    }
+
+    func requestDeleteSelection() {
+        let count = checkedCount
+        guard count > 0 else { return }
+        Task { @MainActor in
+            if await ask(
+                title: "删除 \(count) 条会话？",
+                message: "删除前会自动备份。",
+                confirmLabel: "删除会话",
+                destructive: true,
+                systemImage: "trash.fill",
+                iconTint: .red
+            ) {
+                deleteSelection()
+            }
+        }
+    }
+
+    func requestDeleteConversation(_ conversation: Conversation) {
+        Task { @MainActor in
+            if await ask(
+                title: "删除这条会话？",
+                message: "删除前会自动备份。",
+                confirmLabel: "删除会话",
+                destructive: true,
+                systemImage: "trash.fill",
+                iconTint: .red
+            ) {
+                deleteConversation(conversation)
+            }
+        }
+    }
+
+    func requestBackup() {
+        Task { @MainActor in
+            if await ask(
+                title: "创建聊天记录备份？",
+                message: "备份会保存到应用支持目录，转换前也会自动备份。",
+                confirmLabel: "创建备份",
+                systemImage: "externaldrive.fill"
+            ) {
+                createBackup()
+            }
+        }
+    }
+
+    func requestRestore() {
+        Task { @MainActor in
+            if await ask(
+                title: "恢复最近一次备份？",
+                message: "这会替换当前本机 Codex 聊天记录。操作前请完全退出 Codex。",
+                confirmLabel: "恢复备份",
+                destructive: true,
+                systemImage: "clock.arrow.circlepath",
+                iconTint: .orange
+            ) {
+                restoreLatestBackup()
+            }
+        }
     }
 }
 
@@ -661,6 +792,26 @@ struct SwapArrows: Shape {
         p.move(to: pt(0.34, 0.48)); p.addLine(to: pt(0.07, 0.70)); p.addLine(to: pt(0.34, 0.92)) // 下 箭头←
         return p
     }
+}
+
+enum DialogRole {
+    case primary, normal, destructive, cancel
+}
+
+struct DialogButton: Identifiable {
+    let id = UUID()
+    let label: String
+    let role: DialogRole
+    let action: () -> Void
+}
+
+struct DialogModel: Identifiable {
+    let id = UUID()
+    let title: String
+    var message: String? = nil
+    var systemImage: String? = nil
+    var iconTint: Color = Theme.accent1
+    let buttons: [DialogButton]
 }
 
 struct MainView: View {
@@ -730,36 +881,106 @@ struct MainView: View {
             }
         }
         .animation(.easeInOut(duration: 0.15), value: store.operationLabel)
+        .overlay {
+            if let dialog = store.dialog {
+                DialogOverlay(store: store, model: dialog)
+                    .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.14), value: store.dialog?.id)
     }
 
-    private func confirmBackup() {
-        confirm(
-            title: "创建聊天记录备份？",
-            message: "备份会保存到应用支持目录，转换前也会自动备份。",
-            confirmTitle: "创建备份"
-        ) {
-            store.createBackup()
+}
+
+struct DialogOverlay: View {
+    @ObservedObject var store: VaultStore
+    let model: DialogModel
+
+    var body: some View {
+        ZStack {
+            Color.black.opacity(0.30)
+                .ignoresSafeArea()
+                .onTapGesture { store.finishDialog(false) }
+
+            VStack(spacing: 0) {
+                VStack(spacing: 11) {
+                    if let icon = model.systemImage {
+                        Image(systemName: icon)
+                            .font(.system(size: 30, weight: .medium))
+                            .foregroundStyle(model.iconTint)
+                    }
+                    Text(model.title)
+                        .font(.system(size: 16, weight: .bold))
+                        .multilineTextAlignment(.center)
+                    if let message = model.message {
+                        Text(message)
+                            .font(.system(size: 13))
+                            .foregroundStyle(.secondary)
+                            .multilineTextAlignment(.center)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .padding(.horizontal, 24)
+                .padding(.top, 26)
+                .padding(.bottom, 20)
+
+                Divider()
+
+                if model.buttons.count > 2 {
+                    VStack(spacing: 0) {
+                        ForEach(Array(model.buttons.enumerated()), id: \.element.id) { index, button in
+                            if index > 0 { Divider() }
+                            DialogButtonView(button: button) { store.dialog = nil; button.action() }
+                                .frame(height: 46)
+                        }
+                    }
+                } else {
+                    HStack(spacing: 0) {
+                        ForEach(Array(model.buttons.enumerated()), id: \.element.id) { index, button in
+                            if index > 0 { Divider().frame(height: 46) }
+                            DialogButtonView(button: button) { store.dialog = nil; button.action() }
+                        }
+                    }
+                    .frame(height: 46)
+                }
+            }
+            .frame(width: 324)
+            .background(
+                RoundedRectangle(cornerRadius: 16, style: .continuous).fill(Theme.card)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: 16, style: .continuous).stroke(Theme.hairline, lineWidth: 1)
+            )
+            .shadow(color: .black.opacity(0.28), radius: 30, y: 12)
         }
     }
+}
 
-    private func confirmRestore() {
-        confirm(
-            title: "恢复最近一次备份？",
-            message: "这会替换当前本机 Codex 聊天记录。操作前请完全退出 Codex。",
-            confirmTitle: "恢复备份"
-        ) {
-            store.restoreLatestBackup()
+struct DialogButtonView: View {
+    let button: DialogButton
+    let tap: () -> Void
+    @State private var hovering = false
+
+    var body: some View {
+        Button(action: tap) {
+            Text(button.label)
+                .font(.system(size: 13.5, weight: button.role == .cancel ? .medium : .semibold))
+                .foregroundStyle(tint)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(hovering ? Color.primary.opacity(0.05) : Color.clear)
+                .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 
-    private func confirm(title: String, message: String, confirmTitle: String, action: () -> Void) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: confirmTitle)
-        alert.addButton(withTitle: "取消")
-        if alert.runModal() == .alertFirstButtonReturn {
-            action()
+    private var tint: Color {
+        switch button.role {
+        case .primary: return Theme.accent1
+        case .destructive: return .red
+        case .normal: return .primary
+        case .cancel: return .secondary
         }
     }
 }
@@ -791,22 +1012,10 @@ struct HeaderView: View {
                 store.chooseCodexRoot()
             }
             HeaderButton(title: "备份", icon: "externaldrive") {
-                confirm(
-                    title: "创建聊天记录备份？",
-                    message: "备份会保存到应用支持目录，转换前也会自动备份。",
-                    confirmTitle: "创建备份"
-                ) {
-                    store.createBackup()
-                }
+                store.requestBackup()
             }
             HeaderButton(title: "恢复", icon: "clock.arrow.circlepath") {
-                confirm(
-                    title: "恢复最近一次备份？",
-                    message: "这会替换当前本机 Codex 聊天记录。操作前请完全退出 Codex。",
-                    confirmTitle: "恢复备份"
-                ) {
-                    store.restoreLatestBackup()
-                }
+                store.requestRestore()
             }
             HeaderButton(title: "备份管理", icon: "archivebox") {
                 store.manageBackups()
@@ -815,17 +1024,6 @@ struct HeaderView: View {
         .padding(.horizontal, 18)
         .frame(height: 66)
         .background(Theme.card)
-    }
-
-    private func confirm(title: String, message: String, confirmTitle: String, action: () -> Void) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: confirmTitle)
-        alert.addButton(withTitle: "取消")
-        if alert.runModal() == .alertFirstButtonReturn {
-            action()
-        }
     }
 }
 
@@ -1070,32 +1268,20 @@ struct ConversionPanel: View {
                     fromLabel: "API",
                     toLabel: "官方",
                     subtitle: scopeSubtitle(apiScope, emptyText: "没有可转换的 API 会话"),
-                    prominent: true,
+                    prominent: store.selectedToOfficial == true,
                     disabled: apiScope.conversationIDs.isEmpty
                 ) {
-                    confirmMigration(
-                        title: "\(apiScope.usesSelection ? "把已选" : "把全部 API") \(apiScope.conversationIDs.count) 条会话转换到官方？",
-                        message: migrationWarningText(count: apiScope.conversationIDs.count),
-                        confirmTitle: "转换到官方"
-                    ) {
-                        store.migrateSelection(to: ProviderCategory.officialID)
-                    }
+                    store.requestMigrate(toOfficial: true)
                 }
 
                 DirectionButton(
                     fromLabel: "官方",
                     toLabel: "API",
                     subtitle: scopeSubtitle(officialScope, emptyText: "没有可转换的官方会话"),
-                    prominent: false,
+                    prominent: store.selectedToOfficial == false,
                     disabled: officialScope.conversationIDs.isEmpty
                 ) {
-                    confirmMigration(
-                        title: "\(officialScope.usesSelection ? "把已选" : "把全部官方") \(officialScope.conversationIDs.count) 条会话转换到 API？",
-                        message: migrationWarningText(count: officialScope.conversationIDs.count),
-                        confirmTitle: "转换到 API"
-                    ) {
-                        store.migrateSelection(to: store.apiProviderID)
-                    }
+                    store.requestMigrate(toOfficial: false)
                 }
 
                 if store.checkedCount > 0 {
@@ -1106,13 +1292,7 @@ struct ConversionPanel: View {
                             disabled: false,
                             destructive: true
                         ) {
-                            confirmMigration(
-                                title: "删除 \(store.checkedCount) 条会话？",
-                                message: "删除前会自动备份。",
-                                confirmTitle: "删除会话"
-                            ) {
-                                store.deleteSelection()
-                            }
+                            store.requestDeleteSelection()
                         }
                     }
                     .frame(width: 150)
@@ -1126,24 +1306,6 @@ struct ConversionPanel: View {
     private func scopeSubtitle(_ scope: MigrationScope, emptyText: String) -> String {
         if scope.conversationIDs.isEmpty { return emptyText }
         return scope.usesSelection ? "转移已选 \(scope.conversationIDs.count) 条" : "全部 \(scope.conversationIDs.count) 条"
-    }
-
-    private func migrationWarningText(count: Int) -> String {
-        "操作前会自动备份。"
-    }
-
-    private func confirmMigration(title: String, message: String, confirmTitle: String, action: () -> Void) {
-        let alert = NSAlert()
-        alert.messageText = title
-        alert.informativeText = message
-        alert.addButton(withTitle: confirmTitle)
-        alert.addButton(withTitle: "取消")
-        if confirmTitle.contains("删除") {
-            alert.alertStyle = .warning
-        }
-        if alert.runModal() == .alertFirstButtonReturn {
-            action()
-        }
     }
 }
 
@@ -1179,11 +1341,12 @@ struct DirectionButton: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .frame(height: 66)
-            .background(prominent ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.card))
+            .background(neutralBackground)
+            .background(prominent ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.clear))
             .foregroundStyle(prominent ? Color.white : Color.primary)
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
-                    .stroke(prominent ? Color.clear : Theme.hairline, lineWidth: 1)
+                    .stroke(prominent ? Color.clear : (hovering ? Theme.accent1.opacity(0.5) : Theme.hairline), lineWidth: prominent ? 0 : 1.4)
             )
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
             .shadow(color: prominent ? Theme.accent1.opacity(0.30) : Color.clear, radius: 12, y: 6)
@@ -1194,6 +1357,10 @@ struct DirectionButton: View {
         .disabled(disabled)
         .onHover { hovering = $0 && !disabled }
         .animation(.easeOut(duration: 0.12), value: hovering)
+    }
+
+    private var neutralBackground: Color {
+        hovering ? Theme.accent1.opacity(0.08) : Color.primary.opacity(0.045)
     }
 }
 
@@ -1519,7 +1686,7 @@ struct InspectorPanel: View {
                             }
 
                             Button {
-                                confirmDelete(conversation)
+                                store.requestDeleteConversation(conversation)
                             } label: {
                                 Label("删除这条会话", systemImage: "trash")
                             }
@@ -1542,18 +1709,6 @@ struct InspectorPanel: View {
     private func copy(_ value: String) {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(value, forType: .string)
-    }
-
-    private func confirmDelete(_ conversation: Conversation) {
-        let alert = NSAlert()
-        alert.messageText = "删除这条会话？"
-        alert.informativeText = "删除前会自动备份。"
-        alert.addButton(withTitle: "删除会话")
-        alert.addButton(withTitle: "取消")
-        alert.alertStyle = .warning
-        if alert.runModal() == .alertFirstButtonReturn {
-            store.deleteConversation(conversation)
-        }
     }
 
 }
