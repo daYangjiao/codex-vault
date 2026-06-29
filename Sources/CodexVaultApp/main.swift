@@ -608,6 +608,36 @@ final class VaultStore: ObservableObject {
     }
 }
 
+enum Theme {
+    static let accent1 = Color(red: 0.416, green: 0.471, blue: 1.0)   // #6a78ff
+    static let accent2 = Color(red: 0.667, green: 0.337, blue: 0.949) // #aa56f2
+    static var accentGradient: LinearGradient {
+        LinearGradient(colors: [accent1, accent2], startPoint: .topLeading, endPoint: .bottomTrailing)
+    }
+    static let page = Color(nsColor: .underPageBackgroundColor)
+    static let card = Color(nsColor: .textBackgroundColor)
+    static let hairline = Color.primary.opacity(0.07)
+    static let cardRadius: CGFloat = 14
+    static var cardShadow: Color { Color.black.opacity(0.06) }
+    static var accentSoft: Color { accent1.opacity(0.12) }
+}
+
+/// logo 里的双向交换箭头（上箭头向右、下箭头向左），与预览的 SVG 一致。
+struct SwapArrows: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let w = rect.width, h = rect.height
+        func pt(_ x: CGFloat, _ y: CGFloat) -> CGPoint {
+            CGPoint(x: rect.minX + x * w, y: rect.minY + y * h)
+        }
+        p.move(to: pt(0.06, 0.30)); p.addLine(to: pt(0.82, 0.30))      // 上 横线
+        p.move(to: pt(0.66, 0.08)); p.addLine(to: pt(0.93, 0.30)); p.addLine(to: pt(0.66, 0.52)) // 上 箭头→
+        p.move(to: pt(0.94, 0.70)); p.addLine(to: pt(0.18, 0.70))      // 下 横线
+        p.move(to: pt(0.34, 0.48)); p.addLine(to: pt(0.07, 0.70)); p.addLine(to: pt(0.34, 0.92)) // 下 箭头←
+        return p
+    }
+}
+
 struct MainView: View {
     @ObservedObject var store: VaultStore
 
@@ -641,7 +671,7 @@ struct MainView: View {
                             InspectorPanel(store: store)
                                 .frame(width: 340)
                         }
-                        .background(Color(nsColor: .windowBackgroundColor))
+                        .background(Theme.card)
                         .shadow(color: .black.opacity(0.12), radius: 18, x: -4, y: 0)
                         .transition(.opacity)
                     }
@@ -650,7 +680,7 @@ struct MainView: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.page)
     }
 
     private func confirmBackup() {
@@ -692,9 +722,9 @@ struct HeaderView: View {
         HStack(spacing: 14) {
             AppMark()
 
-            VStack(alignment: .leading, spacing: 2) {
+            VStack(alignment: .leading, spacing: 1) {
                 Text("Codex 对话管家")
-                    .font(.system(size: 18, weight: .semibold))
+                    .font(.system(size: 17, weight: .bold))
                 Text("Codex 聊天记录转换")
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -735,7 +765,7 @@ struct HeaderView: View {
         }
         .padding(.horizontal, 18)
         .frame(height: 66)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.card)
     }
 
     private func confirm(title: String, message: String, confirmTitle: String, action: () -> Void) {
@@ -753,12 +783,12 @@ struct HeaderView: View {
 struct AppMark: View {
     var body: some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 10)
-                .fill(Color.white)
-                .shadow(color: .black.opacity(0.08), radius: 10, y: 4)
-            Image(systemName: "bubble.left.and.text.bubble.right")
-                .font(.system(size: 21, weight: .medium))
-                .foregroundStyle(.black.opacity(0.78))
+            RoundedRectangle(cornerRadius: 11, style: .continuous)
+                .fill(Theme.accentGradient)
+                .shadow(color: Theme.accent1.opacity(0.45), radius: 8, y: 4)
+            SwapArrows()
+                .stroke(Color.white, style: StrokeStyle(lineWidth: 2.6, lineCap: .round, lineJoin: .round))
+                .frame(width: 23, height: 21)
         }
         .frame(width: 40, height: 40)
     }
@@ -768,15 +798,29 @@ struct HeaderButton: View {
     let title: String
     let icon: String
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            Label(title, systemImage: icon)
-                .labelStyle(.titleAndIcon)
-                .font(.system(size: 13, weight: .medium))
+            HStack(spacing: 6) {
+                Image(systemName: icon)
+                    .font(.system(size: 12.5, weight: .semibold))
+                    .opacity(0.85)
+                Text(title)
+                    .font(.system(size: 12.5, weight: .semibold))
+            }
+            .foregroundStyle(Color.primary.opacity(0.78))
+            .padding(.horizontal, 11)
+            .frame(height: 32)
+            .background(hovering ? Color.primary.opacity(0.06) : Color.clear)
+            .overlay(
+                RoundedRectangle(cornerRadius: 9)
+                    .stroke(hovering ? Theme.hairline : Color.clear, lineWidth: 1)
+            )
+            .clipShape(RoundedRectangle(cornerRadius: 9))
         }
-        .buttonStyle(.bordered)
-        .controlSize(.regular)
+        .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -897,9 +941,9 @@ struct FilterPanel: View {
                 }
             }
         }
-        .padding(16)
+        .padding(14)
         .frame(maxHeight: .infinity, alignment: .top)
-        .background(Color(nsColor: .controlBackgroundColor).opacity(0.42))
+        .background(Theme.card)
     }
 }
 
@@ -909,26 +953,32 @@ struct FilterRow: View {
     let count: Int
     let selected: Bool
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: icon)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13.5, weight: .semibold))
                     .frame(width: 18)
+                    .foregroundStyle(selected ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.secondary))
                 Text(title)
-                    .font(.system(size: 14, weight: .medium))
+                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
+                    .foregroundStyle(selected ? Theme.accent1 : Color.primary.opacity(0.85))
                 Spacer()
                 Text("\(count)")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(selected ? Theme.accent1 : Color.secondary)
             }
-            .padding(.horizontal, 10)
-            .frame(height: 34)
-            .background(selected ? Color.black.opacity(0.08) : Color.clear)
-            .clipShape(RoundedRectangle(cornerRadius: 8))
+            .padding(.horizontal, 11)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(selected ? AnyShapeStyle(Theme.accentSoft) : AnyShapeStyle(hovering ? Color.primary.opacity(0.05) : Color.clear))
+            )
         }
         .buttonStyle(.plain)
+        .onHover { hovering = $0 }
     }
 }
 
@@ -968,9 +1018,9 @@ struct ConversionPanel: View {
 
             HStack(spacing: 10) {
                 DirectionButton(
-                    title: apiScope.usesSelection ? "转移已选 \(apiScope.conversationIDs.count) 条 → 官方" : "转移全部 API → 官方",
-                    subtitle: apiScope.conversationIDs.isEmpty ? "没有可转换的 API 会话" : "\(apiScope.conversationIDs.count) 条转到官方",
-                    icon: "arrow.right.circle.fill",
+                    fromLabel: "API",
+                    toLabel: "官方",
+                    subtitle: scopeSubtitle(apiScope, emptyText: "没有可转换的 API 会话"),
                     prominent: true,
                     disabled: apiScope.conversationIDs.isEmpty
                 ) {
@@ -984,9 +1034,9 @@ struct ConversionPanel: View {
                 }
 
                 DirectionButton(
-                    title: officialScope.usesSelection ? "转移已选 \(officialScope.conversationIDs.count) 条 → API" : "转移全部官方 → API",
-                    subtitle: officialScope.conversationIDs.isEmpty ? "没有可转换的官方会话" : "\(officialScope.conversationIDs.count) 条转到 API",
-                    icon: "arrow.left.circle",
+                    fromLabel: "官方",
+                    toLabel: "API",
+                    subtitle: scopeSubtitle(officialScope, emptyText: "没有可转换的官方会话"),
                     prominent: false,
                     disabled: officialScope.conversationIDs.isEmpty
                 ) {
@@ -1021,7 +1071,12 @@ struct ConversionPanel: View {
             }
         }
         .padding(16)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.card)
+    }
+
+    private func scopeSubtitle(_ scope: MigrationScope, emptyText: String) -> String {
+        if scope.conversationIDs.isEmpty { return emptyText }
+        return scope.usesSelection ? "转移已选 \(scope.conversationIDs.count) 条" : "全部 \(scope.conversationIDs.count) 条"
     }
 
     private func migrationWarningText(count: Int) -> String {
@@ -1044,44 +1099,52 @@ struct ConversionPanel: View {
 }
 
 struct DirectionButton: View {
-    let title: String
+    let fromLabel: String
+    let toLabel: String
     let subtitle: String
-    let icon: String
     let prominent: Bool
     let disabled: Bool
     let action: () -> Void
+    @State private var hovering = false
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 12) {
-                Image(systemName: icon)
-                    .font(.system(size: 22, weight: .semibold))
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(title)
-                        .font(.system(size: 18, weight: .semibold))
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.82)
-                    Text(subtitle)
-                        .font(.caption)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.85)
-                        .foregroundStyle(prominent ? Color.white.opacity(0.72) : Color.secondary)
+            VStack(alignment: .leading, spacing: 5) {
+                HStack(spacing: 9) {
+                    Text(fromLabel)
+                    Image(systemName: "arrow.right")
+                        .font(.system(size: 14, weight: .bold))
+                        .opacity(0.9)
+                    Text(toLabel)
                 }
-                Spacer()
+                .font(.system(size: 16, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+
+                Text(subtitle)
+                    .font(.caption)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+                    .foregroundStyle(prominent ? Color.white.opacity(0.78) : Color.secondary)
             }
-            .padding(.horizontal, 14)
-            .frame(height: 68)
-            .background(prominent ? Color.black : Color(nsColor: .controlBackgroundColor))
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal, 16)
+            .frame(height: 66)
+            .background(prominent ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Theme.card))
             .foregroundStyle(prominent ? Color.white : Color.primary)
             .overlay(
-                RoundedRectangle(cornerRadius: 10)
-                    .stroke(prominent ? Color.clear : Color.black.opacity(0.10), lineWidth: 1)
+                RoundedRectangle(cornerRadius: 13, style: .continuous)
+                    .stroke(prominent ? Color.clear : Theme.hairline, lineWidth: 1)
             )
-            .clipShape(RoundedRectangle(cornerRadius: 10))
-            .opacity(disabled ? 0.38 : 1)
+            .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
+            .shadow(color: prominent ? Theme.accent1.opacity(0.30) : Color.clear, radius: 12, y: 6)
+            .scaleEffect(hovering && !disabled ? 1.012 : 1)
+            .opacity(disabled ? 0.4 : 1)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
+        .onHover { hovering = $0 && !disabled }
+        .animation(.easeOut(duration: 0.12), value: hovering)
     }
 }
 
@@ -1134,16 +1197,18 @@ struct ConversationListView: View {
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
             } else {
                 ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 8) {
+                    LazyVStack(alignment: .leading, spacing: 13) {
                         ForEach(store.conversationGroups) { group in
                             ConversationGroupView(group: group, store: store)
                         }
                     }
-                    .padding(.horizontal, 14)
-                    .padding(.vertical, 10)
+                    .padding(.horizontal, 18)
+                    .padding(.vertical, 14)
                 }
+                .background(Theme.page)
             }
         }
+        .background(Theme.page)
     }
 }
 
@@ -1153,15 +1218,23 @@ struct ListHeaderView: View {
     var body: some View {
         VStack(spacing: 10) {
             HStack(spacing: 10) {
-                HStack {
+                HStack(spacing: 8) {
                     Image(systemName: "magnifyingglass")
                         .foregroundStyle(.secondary)
                     TextField("搜索标题、会话编号或项目", text: $store.searchText)
                         .textFieldStyle(.plain)
                 }
-                .padding(8)
-                .background(Color(nsColor: .controlBackgroundColor))
-                .clipShape(RoundedRectangle(cornerRadius: 8))
+                .padding(.horizontal, 12)
+                .padding(.vertical, 9)
+                .background(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .fill(Theme.card)
+                        .shadow(color: Theme.cardShadow, radius: 4, y: 2)
+                )
+                .overlay(
+                    RoundedRectangle(cornerRadius: 11, style: .continuous)
+                        .stroke(Theme.hairline, lineWidth: 1)
+                )
 
                 MetricView(title: "总数", value: "\(store.totalCount)")
                 MetricView(title: "API", value: "\(store.apiCount)")
@@ -1189,9 +1262,9 @@ struct ListHeaderView: View {
                 .disabled(store.checkedCount == 0)
             }
         }
-        .padding(.horizontal, 16)
+        .padding(.horizontal, 18)
         .padding(.vertical, 12)
-        .background(Color(nsColor: .windowBackgroundColor))
+        .background(Theme.page)
     }
 }
 
@@ -1200,25 +1273,33 @@ struct ConversationGroupView: View {
     @ObservedObject var store: VaultStore
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
+        VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
-                Image(systemName: "folder")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundStyle(.secondary)
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundStyle(.secondary.opacity(0.6))
                 Text(group.title)
-                    .font(.system(size: 14, weight: .semibold))
+                    .font(.system(size: 13, weight: .bold))
                     .lineLimit(1)
                 Spacer()
                 Text("\(group.conversations.count)")
-                    .font(.caption)
+                    .font(.system(size: 11.5, weight: .semibold))
                     .foregroundStyle(.secondary)
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(Color.primary.opacity(0.06)))
             }
-            .padding(.horizontal, 8)
-            .padding(.top, 6)
+            .padding(.horizontal, 16)
+            .padding(.vertical, 11)
             .help(group.path)
 
-            VStack(spacing: 1) {
-                ForEach(group.conversations) { conversation in
+            Divider().opacity(0.6)
+
+            VStack(spacing: 0) {
+                ForEach(Array(group.conversations.enumerated()), id: \.element.id) { index, conversation in
+                    if index > 0 {
+                        Divider().opacity(0.45).padding(.leading, 46)
+                    }
                     ConversationRowView(
                         conversation: conversation,
                         selected: store.selectedConversationID == conversation.id,
@@ -1229,6 +1310,15 @@ struct ConversationGroupView: View {
                 }
             }
         }
+        .background(
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .fill(Theme.card)
+                .shadow(color: Theme.cardShadow, radius: 8, y: 3)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: Theme.cardRadius, style: .continuous)
+                .stroke(Theme.hairline, lineWidth: 1)
+        )
     }
 }
 
@@ -1239,21 +1329,31 @@ struct ConversationRowView: View {
     let toggleChecked: () -> Void
     let select: () -> Void
 
+    @State private var hovering = false
+
     var body: some View {
-        HStack(spacing: 9) {
-            Image(systemName: checked ? "checkmark.circle.fill" : "circle")
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundStyle(checked ? Color.black : Color.secondary)
-                .frame(width: 24, height: 42)
-                .contentShape(Rectangle())
-                .onTapGesture {
-                    toggleChecked()
+        HStack(spacing: 11) {
+            ZStack {
+                if checked {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(Theme.accentGradient)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .heavy))
+                        .foregroundStyle(.white)
+                } else {
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .stroke(Color.secondary.opacity(0.45), lineWidth: 1.6)
                 }
+            }
+            .frame(width: 18, height: 18)
+            .frame(width: 24, height: 44)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleChecked() }
             .help(checked ? "取消勾选" : "勾选会话")
 
             HStack(spacing: 9) {
                 Text(conversation.title)
-                    .font(.system(size: 14, weight: selected ? .semibold : .medium))
+                    .font(.system(size: 13.5, weight: selected ? .semibold : .medium))
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -1272,16 +1372,18 @@ struct ConversationRowView: View {
                     .fixedSize()
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-            .frame(height: 42)
+            .frame(height: 44)
             .contentShape(Rectangle())
-            .onTapGesture {
-                select()
-            }
+            .onTapGesture { select() }
         }
-        .padding(.horizontal, 8)
-        .frame(height: 42)
-        .background(selected ? Color.black.opacity(0.08) : Color.clear)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .padding(.horizontal, 14)
+        .frame(height: 44)
+        .background(
+            selected
+                ? AnyShapeStyle(LinearGradient(colors: [Theme.accent1.opacity(0.10), Theme.accent2.opacity(0.06)], startPoint: .leading, endPoint: .trailing))
+                : AnyShapeStyle(hovering ? Color.primary.opacity(0.035) : Color.clear)
+        )
+        .onHover { hovering = $0 }
     }
 }
 
@@ -1290,14 +1392,26 @@ struct MetricView: View {
     let value: String
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 1) {
+        VStack(spacing: 2) {
             Text(value)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: 16, weight: .bold))
+                .monospacedDigit()
             Text(title)
-                .font(.caption2)
+                .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(.secondary)
         }
-        .frame(width: 48, alignment: .leading)
+        .frame(minWidth: 50)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(Theme.card)
+                .shadow(color: Theme.cardShadow, radius: 4, y: 2)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .stroke(Theme.hairline, lineWidth: 1)
+        )
     }
 }
 
@@ -1369,7 +1483,7 @@ struct InspectorPanel: View {
                 .padding(18)
                 .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .background(Color(nsColor: .windowBackgroundColor))
+            .background(Theme.card)
         } else {
             ContentUnavailableView("未选择会话", systemImage: "sidebar.right", description: Text("从列表中选择一条会话。"))
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
