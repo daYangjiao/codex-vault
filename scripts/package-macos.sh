@@ -11,7 +11,7 @@ APP_BUNDLE="$DIST_DIR/$APP_NAME.app"
 CONTENTS_DIR="$BUILD_APP_BUNDLE/Contents"
 MACOS_DIR="$CONTENTS_DIR/MacOS"
 RESOURCES_DIR="$CONTENTS_DIR/Resources"
-EXECUTABLE="$ROOT_DIR/.build/release/CodexVault"
+UNIVERSAL_BIN="$WORK_DIR/CodexVault-universal"
 ICON_FILE="$ROOT_DIR/Assets/AppIcon/CodexVault.icns"
 DMG_PATH="$DIST_DIR/Codex-Vault.dmg"
 TEMP_DMG_PATH="$WORK_DIR/Codex-Vault.dmg"
@@ -23,12 +23,26 @@ trap cleanup EXIT
 
 cd "$ROOT_DIR"
 
-swift build -c release --product CodexVault
+# 构建通用二进制（Apple 芯片 + Intel），让两类 Mac 都能直接运行。
+# Build a universal binary (Apple Silicon + Intel) so both Mac types run it directly.
+# 分别编两个架构再用 lipo 合并，这样不依赖完整 Xcode（CommandLineTools 即可）。
+# Build each arch separately and merge with lipo — no full Xcode required (CommandLineTools is enough).
+swift build -c release --arch arm64 --product CodexVault
+ARM_BIN="$ROOT_DIR/.build/arm64-apple-macosx/release/CodexVault"
+
+if swift build -c release --arch x86_64 --product CodexVault 2>/dev/null; then
+  X86_BIN="$ROOT_DIR/.build/x86_64-apple-macosx/release/CodexVault"
+  lipo -create -output "$UNIVERSAL_BIN" "$ARM_BIN" "$X86_BIN"
+else
+  echo "warning: x86_64 slice failed to build; shipping arm64-only (Apple Silicon)." >&2
+  cp "$ARM_BIN" "$UNIVERSAL_BIN"
+fi
+echo "binary archs: $(lipo -archs "$UNIVERSAL_BIN")"
 
 rm -rf "$APP_BUNDLE" "$DMG_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
-cp "$EXECUTABLE" "$MACOS_DIR/CodexVault"
+cp "$UNIVERSAL_BIN" "$MACOS_DIR/CodexVault"
 chmod +x "$MACOS_DIR/CodexVault"
 if [[ -f "$ICON_FILE" ]]; then
   cp "$ICON_FILE" "$RESOURCES_DIR/CodexVault.icns"

@@ -74,6 +74,35 @@ swift run CodexVault                     # 直接运行（开发调试）
 ~/Library/Application Support/Codex Vault/Backups
 ```
 
+## 常见问题与修复
+
+**安装命令卡住或下载失败（`curl: (xx)` / 连不上 github）**
+多半是网络访问 GitHub 不稳。挂上代理后重试，或换个网络。脚本只是下载 + 解压，重跑一次没有副作用。
+
+**提示「已损坏，无法打开，应该移到废纸篓」**
+这是 macOS 对未公证应用 + 隔离标记的拦截。用一行终端命令安装时不会出现；如果你是手动下载的，执行下面这条再打开：
+```bash
+xattr -cr "/Applications/Codex 对话管家.app"
+```
+
+**提示「无法验证开发者 / 来自身份不明的开发者」**
+打开「系统设置 → 隐私与安全性」，往下找到被拦的提示，点「仍要打开」；或对着应用图标右键选「打开」。
+
+**应用打不开 / 闪退，提示架构不支持**
+安装包是通用二进制（Apple 芯片 + Intel 都支持），需要 macOS 14 及以上。系统过低请升级，或用源码方式自行构建。
+
+**应用里看不到任何会话 / 提示找不到 Codex 记录**
+说明没找到 `~/.codex` 目录。请先确认本机装过并至少打开运行过一次 Codex；如果你的记录目录在别处，用左上角「选择文件夹」手动指定。
+
+**转换/删除按钮点了没反应，提示 Codex 正在运行**
+迁移会写入本机记录，必须先**完全退出 Codex**（包括菜单栏图标），并结束 VS Code 里 Codex 面板拉起的后台进程，再操作。
+
+**转换成功了，但 Codex 里还是看不到那些会话**
+Codex 按「来源」分桶显示。转换后需**重新打开 Codex**，并切到目标来源（API 或官方），列表才会刷新出来。
+
+**装错地方 / 想卸载**
+直接把「应用程序」里的「Codex 对话管家.app」拖到废纸篓即可。备份仍保留在 `~/Library/Application Support/Codex Vault/Backups`，可手动删除。
+
 ---
 
 # Codex Vault (English)
@@ -151,3 +180,32 @@ Backups directory:
 ```text
 ~/Library/Application Support/Codex Vault/Backups
 ```
+
+## Troubleshooting
+
+**Install command hangs or download fails (`curl: (xx)` / can't reach github)**
+Usually unstable access to GitHub. Retry behind a proxy or on a different network. The script only downloads + extracts, so re-running it is safe.
+
+**"App is damaged and can't be opened. You should move it to the Trash."**
+macOS blocking an unnotarized app that carries the quarantine flag. This doesn't happen with the one-line installer; if you downloaded manually, run this and reopen:
+```bash
+xattr -cr "/Applications/Codex 对话管家.app"
+```
+
+**"Cannot verify developer / unidentified developer"**
+Open **System Settings → Privacy & Security**, scroll to the blocked-app prompt, and click **Open Anyway** — or right-click the app icon and choose **Open**.
+
+**App won't launch / crashes with an architecture error**
+The build is a universal binary (Apple Silicon + Intel) and requires macOS 14+. Upgrade macOS if it's older, or build from source.
+
+**No conversations shown / "Codex directory not found"**
+It couldn't locate `~/.codex`. Make sure Codex is installed and has been launched at least once. If your data lives elsewhere, use **Choose Folder** (top-left) to point at it.
+
+**Migrate/Delete does nothing — "Codex is running"**
+Migration writes to the local store, so you must **fully quit Codex** (including the menu-bar icon) and end any background process spawned by the Codex panel in VS Code, then retry.
+
+**Migration succeeded, but the conversations still aren't visible in Codex**
+Codex groups history by source. After migrating, **reopen Codex** and switch to the target source (API or Official) for the list to refresh.
+
+**Installed in the wrong place / want to uninstall**
+Drag **Codex 对话管家.app** from /Applications to the Trash. Backups remain in `~/Library/Application Support/Codex Vault/Backups` and can be deleted manually.
