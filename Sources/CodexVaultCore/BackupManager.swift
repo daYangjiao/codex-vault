@@ -72,11 +72,13 @@ public struct BackupManager: Sendable {
         ByteCountFormatter.string(fromByteCount: totalSizeBytes(), countStyle: .file)
     }
 
-    /// 删除全部备份。
-    public func deleteAllBackups() {
+    /// 删除全部备份。返回是否全部删除成功（用于如实告知用户，避免部分失败仍报"已清空"）。
+    @discardableResult
+    public func deleteAllBackups() -> Bool {
         for backup in listBackups() {
             try? FileManager.default.removeItem(at: backup.backupDirectory)
         }
+        return listBackups().isEmpty
     }
 
     private func directorySize(_ url: URL) -> Int64 {

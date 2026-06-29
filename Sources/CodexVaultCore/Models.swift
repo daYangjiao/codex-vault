@@ -255,6 +255,34 @@ public extension Conversation {
     }
 }
 
+public enum CodexConfig {
+    /// 读取 `<root>/config.toml` 顶层的 `model_provider = "x"` 值（即当前激活的 provider id）。
+    /// 只看进入第一个 `[table]` 段之前的顶层键，避免误读 `[model_providers.x]` 段内字段。
+    public static func currentModelProvider(root: URL) -> String? {
+        let url = root.appendingPathComponent("config.toml")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else {
+            return nil
+        }
+        for rawLine in text.split(separator: "\n", omittingEmptySubsequences: false) {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            if line.hasPrefix("[") {
+                break
+            }
+            if line.isEmpty || line.hasPrefix("#") {
+                continue
+            }
+            guard line.hasPrefix("model_provider"), let eq = line.firstIndex(of: "=") else {
+                continue
+            }
+            let value = line[line.index(after: eq)...]
+                .trimmingCharacters(in: .whitespaces)
+                .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+            return value.isEmpty ? nil : value
+        }
+        return nil
+    }
+}
+
 public enum ProviderCategory {
     /// Codex 官方 provider 的固定 id。
     public static let officialID = "openai"

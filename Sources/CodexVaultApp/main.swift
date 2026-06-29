@@ -212,9 +212,13 @@ final class VaultStore: ObservableObject {
         result?.conversations.filter { $0.isOfficialProvider }.count ?? 0
     }
 
-    /// 本机「转换到 API」时要写入的第三方 provider id（按现有会话推断，兼容非 "custom" 的命名）。
+    /// 本机「转换到 API」时要写入的第三方 provider id。
+    /// 优先用 config.toml 里当前激活的 provider，其次按现有会话推断，兼容非 "custom" 的命名。
     var apiProviderID: String {
-        ProviderCategory.apiProviderID(conversations: result?.conversations ?? [])
+        ProviderCategory.apiProviderID(
+            conversations: result?.conversations ?? [],
+            preferred: CodexConfig.currentModelProvider(root: root)
+        )
     }
 
     /// 侧栏「API 会话」筛选用的哨兵值（非 nil、非 "openai" 即触发「按 API 分类」过滤）。
@@ -322,8 +326,11 @@ final class VaultStore: ObservableObject {
             confirm.addButton(withTitle: "清空")
             confirm.addButton(withTitle: "取消")
             if confirm.runModal() == .alertFirstButtonReturn {
-                backupManager.deleteAllBackups()
-                infoMessage = "已清空全部备份。"
+                if backupManager.deleteAllBackups() {
+                    infoMessage = "已清空全部备份。"
+                } else {
+                    errorMessage = "部分备份未能删除，可在文件夹中手动清理。"
+                }
             }
         default:
             break
@@ -1329,7 +1336,7 @@ struct InspectorPanel: View {
                     }
 
                     DetailSection("基础信息") {
-                        DetailRow("当前位置", ProviderText.name(conversation.effectiveProvider))
+                        DetailRow("当前位置", ProviderText.detail(conversation.effectiveProvider))
                         DetailRow("使用方式", SourceText.name(conversation.sourceKind))
                         DetailRow("项目路径", conversation.projectPath ?? "未知")
                         DetailRow("更新时间", RelativeTimeText.string(from: conversation.lastUpdatedAt))
@@ -1526,6 +1533,18 @@ enum ProviderText {
             return "官方"
         case .some(let provider) where !provider.isEmpty:
             return "API"
+        default:
+            return "未知"
+        }
+    }
+
+    /// 详情里展示分类时带上真实 provider id，方便核对实际写入的是哪个第三方。
+    static func detail(_ provider: String?) -> String {
+        switch provider {
+        case ProviderCategory.officialID:
+            return "官方（openai）"
+        case .some(let provider) where !provider.isEmpty:
+            return "API（\(provider)）"
         default:
             return "未知"
         }
