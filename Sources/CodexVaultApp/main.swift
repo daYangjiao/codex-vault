@@ -99,6 +99,7 @@ final class VaultStore: ObservableObject {
     @Published var errorMessage: String?
     @Published var infoMessage: String?
     @Published var isScanning = false
+    @Published var operationLabel: String?
     @Published var scanMode = "列表模式"
     @Published var showsInspector = false
 
@@ -106,6 +107,9 @@ final class VaultStore: ObservableObject {
     private let scanner = CodexVaultScanner()
     private let migrationEngine = MigrationEngine()
     private let backupManager = BackupManager()
+    private let processGuard = ProcessGuard()
+    /// 操作进行中的串行闸门（与展示用的 operationLabel 解耦，弹重试框时也不会被释放）。
+    private var isOperating = false
 
     init() {
         self.root = locator.defaultRoot()
@@ -421,6 +425,25 @@ final class VaultStore: ObservableObject {
         isScanning = false
     }
 
+    /// 操作前先确认 Codex 已完全退出。返回 true 可继续；false 表示用户取消。
+    /// 检测在后台线程跑（已修复死锁），不卡 UI；Codex 在运行就弹「重试/取消」，让用户关掉后重试。
+    private func ensureCodexClear() async -> Bool {
+        let guardChecker = self.processGuard
+        while true {
+            operationLabel = "正在检查 Codex 是否已退出…"
+            let running = await Task.detached(priority: .userInitiated) {
+                guardChecker.runningCodexProcesses()
+            }.value
+            operationLabel = nil
+            if running.isEmpty {
+                return true
+            }
+            if !presentCodexRunningRetry() {
+                return false
+            }
+        }
+    }
+
     private func performMigration(ids: [String], targetProvider: String, scopeName: String) {
         guard !ids.isEmpty else {
             errorMessage = "没有可转换的会话。"
@@ -428,15 +451,21 @@ final class VaultStore: ObservableObject {
             return
         }
 
-        isScanning = true
-        scanMode = "正在转换"
+        guard !isOperating else { return }
+        isOperating = true
+        operationLabel = "正在检查 Codex 是否已退出…"
         errorMessage = nil
         infoMessage = nil
 
         let root = self.root
         let engine = self.migrationEngine
-        Task {
+        Task { @MainActor in
+            defer { isOperating = false; operationLabel = nil }
+            guard await ensureCodexClear() else { return }
+
+            operationLabel = "正在转换 \(ids.count) 条会话…"
             do {
+                // 不传 skipProcessCheck：引擎会在写入前再查一次 Codex（防止预检后用户又打开 Codex 的竞态）。
                 let report = try await Task.detached(priority: .userInitiated) {
                     try engine.migrate(
                         root: root,
@@ -448,12 +477,8 @@ final class VaultStore: ObservableObject {
                 infoMessage = "\(scopeName)已转换到\(ProviderText.name(report.targetProvider))，共 \(report.migratedCount) 条。已自动备份。"
                 await refreshQuick()
             } catch {
-                scanMode = "列表模式"
-                isScanning = false
-                if isCodexRunning(error) {
-                    if presentCodexRunningRetry() {
-                        performMigration(ids: ids, targetProvider: targetProvider, scopeName: scopeName)
-                    }
+                if case CodexVaultError.codexIsRunning = error {
+                    errorMessage = "检测到 Codex 仍在运行，请完全退出 Codex 后重试。"
                 } else {
                     errorMessage = readableMessage(error)
                 }
@@ -468,14 +493,19 @@ final class VaultStore: ObservableObject {
             return
         }
 
-        isScanning = true
-        scanMode = "正在删除"
+        guard !isOperating else { return }
+        isOperating = true
+        operationLabel = "正在检查 Codex 是否已退出…"
         errorMessage = nil
         infoMessage = nil
 
         let root = self.root
         let engine = self.migrationEngine
-        Task {
+        Task { @MainActor in
+            defer { isOperating = false; operationLabel = nil }
+            guard await ensureCodexClear() else { return }
+
+            operationLabel = "正在删除 \(ids.count) 条会话…"
             do {
                 let report = try await Task.detached(priority: .userInitiated) {
                     try engine.delete(root: root, conversationIDs: ids)
@@ -487,12 +517,8 @@ final class VaultStore: ObservableObject {
                 infoMessage = "\(scopeName)已删除，共 \(report.deletedCount) 条。已自动备份。"
                 await refreshQuick()
             } catch {
-                scanMode = "列表模式"
-                isScanning = false
-                if isCodexRunning(error) {
-                    if presentCodexRunningRetry() {
-                        performDeletion(ids: ids, scopeName: scopeName)
-                    }
+                if case CodexVaultError.codexIsRunning = error {
+                    errorMessage = "检测到 Codex 仍在运行，请完全退出 Codex 后重试。"
                 } else {
                     errorMessage = readableMessage(error)
                 }
@@ -589,13 +615,6 @@ final class VaultStore: ObservableObject {
         return error.localizedDescription
     }
 
-    private func isCodexRunning(_ error: Error) -> Bool {
-        if case CodexVaultError.codexIsRunning = error {
-            return true
-        }
-        return false
-    }
-
     /// Codex 未关闭时的提示弹窗：只显示一句话，给「重试 / 取消」两个按钮。返回是否点了重试。
     private func presentCodexRunningRetry() -> Bool {
         let alert = NSAlert()
@@ -687,6 +706,30 @@ struct MainView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(Theme.page)
+        .overlay {
+            if let label = store.operationLabel {
+                ZStack {
+                    Color.black.opacity(0.18).ignoresSafeArea()
+                    VStack(spacing: 14) {
+                        ProgressView()
+                            .controlSize(.large)
+                        Text(label)
+                            .font(.system(size: 14, weight: .semibold))
+                        Text("处理中，请勿退出应用或打开 Codex")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
+                    .padding(28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 16, style: .continuous)
+                            .fill(Theme.card)
+                            .shadow(color: .black.opacity(0.22), radius: 24, y: 8)
+                    )
+                }
+                .transition(.opacity)
+            }
+        }
+        .animation(.easeInOut(duration: 0.15), value: store.operationLabel)
     }
 
     private func confirmBackup() {

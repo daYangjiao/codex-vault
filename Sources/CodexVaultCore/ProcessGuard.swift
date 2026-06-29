@@ -6,18 +6,22 @@ public struct ProcessGuard: Sendable {
     public func runningCodexProcesses() -> [RunningProcess] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/bin/ps")
-        process.arguments = ["-axo", "pid=,command="]
+        process.arguments = ["-axww", "-o", "pid=,command="]
         let pipe = Pipe()
         process.standardOutput = pipe
+        process.standardError = FileHandle.nullDevice
 
         do {
             try process.run()
-            process.waitUntilExit()
         } catch {
             return []
         }
 
+        // 必须先把管道读空、再 waitUntilExit。否则进程多时 ps 输出超过 64KB 管道缓冲，
+        // ps 阻塞在写、我们阻塞在等退出 → 死锁卡死。
         let data = pipe.fileHandleForReading.readDataToEndOfFile()
+        process.waitUntilExit()
+
         guard let output = String(data: data, encoding: .utf8) else {
             return []
         }
