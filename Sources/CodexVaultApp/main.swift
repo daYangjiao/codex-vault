@@ -614,8 +614,14 @@ enum Theme {
     static var accentGradient: LinearGradient {
         LinearGradient(colors: [accent1, accent2], startPoint: .topLeading, endPoint: .bottomTrailing)
     }
-    static let page = Color(nsColor: .underPageBackgroundColor)
-    static let card = Color(nsColor: .textBackgroundColor)
+    /// 自适应颜色：浅色模式用柔和浅灰底 + 纯白卡片，深色模式用深灰，避免原生底色过深。
+    private static func dynamic(_ light: NSColor, _ dark: NSColor) -> Color {
+        Color(nsColor: NSColor(name: nil) { appearance in
+            appearance.bestMatch(from: [.aqua, .darkAqua]) == .darkAqua ? dark : light
+        })
+    }
+    static let page = dynamic(NSColor(red: 0.957, green: 0.961, blue: 0.976, alpha: 1), NSColor(white: 0.11, alpha: 1))
+    static let card = dynamic(.white, NSColor(white: 0.17, alpha: 1))
     static let hairline = Color.primary.opacity(0.07)
     static let cardRadius: CGFloat = 14
     static var cardShadow: Color { Color.black.opacity(0.06) }
