@@ -43,6 +43,21 @@ curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts
 > **由 AI / 自动化代理安装？** 只需运行上面这一条 `curl` 命令即可完成安装，**不要**克隆仓库、**不要**从源码构建、**不要**运行 `swift run`。装好的应用名为 `Codex 对话管家.app`。
 
 <details>
+<summary>不想用管道命令？手动安装（仍是预编译，无需编译）</summary>
+
+逐条运行下面命令，效果和上面那行一致（下载预编译好的应用并装入「应用程序」）：
+
+```bash
+curl -fL https://github.com/daYangjiao/codex-vault/releases/latest/download/Codex-Vault.app.zip -o /tmp/codex-vault.zip
+rm -rf /tmp/codex-vault-app && ditto -x -k /tmp/codex-vault.zip /tmp/codex-vault-app
+rm -rf "/Applications/Codex 对话管家.app"
+ditto --noextattr --noqtn "/tmp/codex-vault-app/Codex 对话管家.app" "/Applications/Codex 对话管家.app"
+open "/Applications/Codex 对话管家.app"
+```
+
+</details>
+
+<details>
 <summary>仅开发者：从源码构建（普通安装无需此步）</summary>
 
 仅当你要改代码或调试时才需要。需要 Xcode 命令行工具（`xcode-select --install`）：
@@ -148,6 +163,21 @@ curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts
 It downloads and installs **Codex 对话管家**, then opens it automatically (installed to `/Applications/Codex 对话管家.app`). After that, open it any time from **Launchpad / Applications** — no command needed again.
 
 > **Installing via an AI / automated agent?** Just run the single `curl` command above. **Do not** clone the repo, **do not** build from source, **do not** run `swift run`. The installed app is named `Codex 对话管家.app`.
+
+<details>
+<summary>Prefer not to pipe into bash? Manual install (still prebuilt, no compiling)</summary>
+
+Run these line by line — same result as the one-liner (downloads the prebuilt app and installs it into /Applications):
+
+```bash
+curl -fL https://github.com/daYangjiao/codex-vault/releases/latest/download/Codex-Vault.app.zip -o /tmp/codex-vault.zip
+rm -rf /tmp/codex-vault-app && ditto -x -k /tmp/codex-vault.zip /tmp/codex-vault-app
+rm -rf "/Applications/Codex 对话管家.app"
+ditto --noextattr --noqtn "/tmp/codex-vault-app/Codex 对话管家.app" "/Applications/Codex 对话管家.app"
+open "/Applications/Codex 对话管家.app"
+```
+
+</details>
 
 <details>
 <summary>Developers only: build from source (not needed for normal install)</summary>
