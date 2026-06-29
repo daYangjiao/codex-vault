@@ -38,19 +38,21 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-它会自动下载并安装「Codex 对话管家」，装好后会自动打开。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。
+它会自动下载并安装「Codex 对话管家」，装好后会自动打开（安装到 `/Applications/Codex 对话管家.app`）。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。
+
+> **由 AI / 自动化代理安装？** 只需运行上面这一条 `curl` 命令即可完成安装，**不要**克隆仓库、**不要**从源码构建、**不要**运行 `swift run`。装好的应用名为 `Codex 对话管家.app`。
 
 <details>
-<summary>开发者 / AI 代理：从源码构建</summary>
+<summary>仅开发者：从源码构建（普通安装无需此步）</summary>
 
-需要 Xcode 命令行工具（`xcode-select --install`）。本地构建的程序没有「隔离」标记，`swift run` 可直接运行：
+仅当你要改代码或调试时才需要。需要 Xcode 命令行工具（`xcode-select --install`）：
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
 cd codex-vault
 
 swift run CodexVaultSmokeTests          # 自检：验证扫描与迁移核心逻辑
-swift run CodexVault                     # 直接运行（开发调试）
+swift run CodexVault                     # 前台运行一个开发版（不会安装到「应用程序」）
 
 # 或打包并安装到「应用程序」
 ./scripts/package-macos.sh
@@ -143,19 +145,21 @@ Open Terminal and paste this single line:
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-It downloads and installs **Codex 对话管家**, then opens it automatically. After that, open it any time from **Launchpad / Applications** — no command needed again.
+It downloads and installs **Codex 对话管家**, then opens it automatically (installed to `/Applications/Codex 对话管家.app`). After that, open it any time from **Launchpad / Applications** — no command needed again.
+
+> **Installing via an AI / automated agent?** Just run the single `curl` command above. **Do not** clone the repo, **do not** build from source, **do not** run `swift run`. The installed app is named `Codex 对话管家.app`.
 
 <details>
-<summary>Developers / AI agents: build from source</summary>
+<summary>Developers only: build from source (not needed for normal install)</summary>
 
-Requires the Xcode Command Line Tools (`xcode-select --install`). Locally built binaries have no quarantine flag, so `swift run` just works:
+Only needed if you want to modify or debug the code. Requires the Xcode Command Line Tools (`xcode-select --install`):
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
 cd codex-vault
 
 swift run CodexVaultSmokeTests          # self-check: scanning + migration core logic
-swift run CodexVault                     # run directly (dev)
+swift run CodexVault                     # runs a dev build in the foreground (does NOT install to /Applications)
 
 # or package and install into /Applications
 ./scripts/package-macos.sh
