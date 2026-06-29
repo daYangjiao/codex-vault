@@ -898,7 +898,7 @@ struct DialogOverlay: View {
 
     var body: some View {
         ZStack {
-            Color.black.opacity(0.30)
+            Color.black.opacity(0.16)
                 .ignoresSafeArea()
                 .onTapGesture { store.finishDialog(false) }
 
@@ -1341,26 +1341,28 @@ struct DirectionButton: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal, 16)
             .frame(height: 66)
-            .background(neutralBackground)
-            .background(prominent ? AnyShapeStyle(Theme.accentGradient) : AnyShapeStyle(Color.clear))
+            .background {
+                if prominent {
+                    Theme.accentGradient
+                } else {
+                    (hovering ? Theme.accent1.opacity(0.12) : Color.primary.opacity(0.05))
+                }
+            }
             .foregroundStyle(prominent ? Color.white : Color.primary)
             .overlay(
                 RoundedRectangle(cornerRadius: 13, style: .continuous)
                     .stroke(prominent ? Color.clear : (hovering ? Theme.accent1.opacity(0.5) : Theme.hairline), lineWidth: prominent ? 0 : 1.4)
             )
             .clipShape(RoundedRectangle(cornerRadius: 13, style: .continuous))
-            .shadow(color: prominent ? Theme.accent1.opacity(0.30) : Color.clear, radius: 12, y: 6)
+            .shadow(color: prominent ? Theme.accent1.opacity(0.32) : Color.clear, radius: 12, y: 6)
             .scaleEffect(hovering && !disabled ? 1.012 : 1)
             .opacity(disabled ? 0.4 : 1)
         }
         .buttonStyle(.plain)
         .disabled(disabled)
         .onHover { hovering = $0 && !disabled }
+        .animation(.easeOut(duration: 0.18), value: prominent)
         .animation(.easeOut(duration: 0.12), value: hovering)
-    }
-
-    private var neutralBackground: Color {
-        hovering ? Theme.accent1.opacity(0.08) : Color.primary.opacity(0.045)
     }
 }
 
