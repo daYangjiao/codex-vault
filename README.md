@@ -38,9 +38,7 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-它会自动下载已编译好的应用、装进「应用程序」并打开。之后随时在**启动台 / 应用程序**里点开「Codex 对话管家」即可，不用再敲命令。
-
-无需 Apple 开发者账号、无需 Xcode：脚本用 `curl` 下载，不会被打上「隔离」标记，所以装完可以**直接打开，不会被 Gatekeeper 拦**。
+它会自动下载并安装「Codex 对话管家」，装好后会自动打开。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。
 
 <details>
 <summary>开发者 / AI 代理：从源码构建</summary>
@@ -80,7 +78,7 @@ swift run CodexVault                     # 直接运行（开发调试）
 多半是网络访问 GitHub 不稳。挂上代理后重试，或换个网络。脚本只是下载 + 解压，重跑一次没有副作用。
 
 **提示「已损坏，无法打开，应该移到废纸篓」**
-这是 macOS 对未公证应用 + 隔离标记的拦截。用一行终端命令安装时不会出现；如果你是手动下载的，执行下面这条再打开：
+这是 macOS 的安全提示。在终端执行下面这条命令，然后重新打开应用：
 ```bash
 xattr -cr "/Applications/Codex 对话管家.app"
 ```
@@ -88,8 +86,8 @@ xattr -cr "/Applications/Codex 对话管家.app"
 **提示「无法验证开发者 / 来自身份不明的开发者」**
 打开「系统设置 → 隐私与安全性」，往下找到被拦的提示，点「仍要打开」；或对着应用图标右键选「打开」。
 
-**应用打不开 / 闪退，提示架构不支持**
-安装包是通用二进制（Apple 芯片 + Intel 都支持），需要 macOS 14 及以上。系统过低请升级，或用源码方式自行构建。
+**应用打不开 / 闪退**
+应用支持 Apple 芯片和 Intel 芯片的 Mac，但需要 macOS 14 及以上。系统版本过低时请先升级 macOS。
 
 **应用里看不到任何会话 / 提示找不到 Codex 记录**
 说明没找到 `~/.codex` 目录。请先确认本机装过并至少打开运行过一次 Codex；如果你的记录目录在别处，用左上角「选择文件夹」手动指定。
@@ -145,9 +143,7 @@ Open Terminal and paste this single line:
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-It downloads the prebuilt app, installs it into /Applications, and launches it. After that, open **Codex 对话管家** any time from **Launchpad / Applications** — no command needed again.
-
-No Apple Developer account and no Xcode required: the script downloads via `curl`, which does **not** add the quarantine flag, so the app opens cleanly — **Gatekeeper won't block it**.
+It downloads and installs **Codex 对话管家**, then opens it automatically. After that, open it any time from **Launchpad / Applications** — no command needed again.
 
 <details>
 <summary>Developers / AI agents: build from source</summary>
@@ -187,7 +183,7 @@ Backups directory:
 Usually unstable access to GitHub. Retry behind a proxy or on a different network. The script only downloads + extracts, so re-running it is safe.
 
 **"App is damaged and can't be opened. You should move it to the Trash."**
-macOS blocking an unnotarized app that carries the quarantine flag. This doesn't happen with the one-line installer; if you downloaded manually, run this and reopen:
+A macOS security prompt. Run this command in Terminal, then open the app again:
 ```bash
 xattr -cr "/Applications/Codex 对话管家.app"
 ```
@@ -195,8 +191,8 @@ xattr -cr "/Applications/Codex 对话管家.app"
 **"Cannot verify developer / unidentified developer"**
 Open **System Settings → Privacy & Security**, scroll to the blocked-app prompt, and click **Open Anyway** — or right-click the app icon and choose **Open**.
 
-**App won't launch / crashes with an architecture error**
-The build is a universal binary (Apple Silicon + Intel) and requires macOS 14+. Upgrade macOS if it's older, or build from source.
+**App won't launch / crashes**
+It runs on both Apple Silicon and Intel Macs but requires macOS 14+. Upgrade macOS if yours is older.
 
 **No conversations shown / "Codex directory not found"**
 It couldn't locate `~/.codex`. Make sure Codex is installed and has been launched at least once. If your data lives elsewhere, use **Choose Folder** (top-left) to point at it.
