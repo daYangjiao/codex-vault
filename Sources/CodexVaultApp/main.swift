@@ -295,6 +295,47 @@ final class VaultStore: ObservableObject {
         }
     }
 
+    /// 备份管理：显示数量与占用大小，可打开文件夹或清空全部。
+    func manageBackups() {
+        let count = backupManager.listBackups().count
+        let alert = NSAlert()
+        alert.messageText = "备份管理"
+        if count == 0 {
+            alert.informativeText = "暂无备份。"
+            alert.addButton(withTitle: "打开文件夹")
+            alert.addButton(withTitle: "关闭")
+            if alert.runModal() == .alertFirstButtonReturn { openBackupsFolder() }
+            return
+        }
+        alert.informativeText = "共 \(count) 个备份，约 \(backupManager.totalSizeText())。自动保留最近 \(backupManager.maxBackups) 个。"
+        alert.addButton(withTitle: "打开文件夹")
+        alert.addButton(withTitle: "清空全部")
+        alert.addButton(withTitle: "关闭")
+        switch alert.runModal() {
+        case .alertFirstButtonReturn:
+            openBackupsFolder()
+        case .alertSecondButtonReturn:
+            let confirm = NSAlert()
+            confirm.alertStyle = .warning
+            confirm.messageText = "清空全部备份？"
+            confirm.informativeText = "将删除全部 \(count) 个本地备份，不可恢复。"
+            confirm.addButton(withTitle: "清空")
+            confirm.addButton(withTitle: "取消")
+            if confirm.runModal() == .alertFirstButtonReturn {
+                backupManager.deleteAllBackups()
+                infoMessage = "已清空全部备份。"
+            }
+        default:
+            break
+        }
+    }
+
+    private func openBackupsFolder() {
+        let dir = backupManager.backupsRoot
+        try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        NSWorkspace.shared.open(dir)
+    }
+
     func migrateAll(from sourceProvider: String, to targetProvider: String) {
         let ids = result?.conversations
             .filter { $0.effectiveProvider == sourceProvider }
@@ -400,9 +441,15 @@ final class VaultStore: ObservableObject {
                 infoMessage = "\(scopeName)已转换到\(ProviderText.name(report.targetProvider))，共 \(report.migratedCount) 条。已自动备份。"
                 await refreshQuick()
             } catch {
-                errorMessage = readableMessage(error)
                 scanMode = "列表模式"
                 isScanning = false
+                if isCodexRunning(error) {
+                    if presentCodexRunningRetry() {
+                        performMigration(ids: ids, targetProvider: targetProvider, scopeName: scopeName)
+                    }
+                } else {
+                    errorMessage = readableMessage(error)
+                }
             }
         }
     }
@@ -433,9 +480,15 @@ final class VaultStore: ObservableObject {
                 infoMessage = "\(scopeName)已删除，共 \(report.deletedCount) 条。已自动备份。"
                 await refreshQuick()
             } catch {
-                errorMessage = readableMessage(error)
                 scanMode = "列表模式"
                 isScanning = false
+                if isCodexRunning(error) {
+                    if presentCodexRunningRetry() {
+                        performDeletion(ids: ids, scopeName: scopeName)
+                    }
+                } else {
+                    errorMessage = readableMessage(error)
+                }
             }
         }
     }
@@ -527,6 +580,24 @@ final class VaultStore: ObservableObject {
             }
         }
         return error.localizedDescription
+    }
+
+    private func isCodexRunning(_ error: Error) -> Bool {
+        if case CodexVaultError.codexIsRunning = error {
+            return true
+        }
+        return false
+    }
+
+    /// Codex 未关闭时的提示弹窗：只显示一句话，给「重试 / 取消」两个按钮。返回是否点了重试。
+    private func presentCodexRunningRetry() -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Codex 尚未关闭"
+        alert.informativeText = "请先完全退出 Codex，再点重试。"
+        alert.addButton(withTitle: "重试")
+        alert.addButton(withTitle: "取消")
+        return alert.runModal() == .alertFirstButtonReturn
     }
 }
 
@@ -650,6 +721,9 @@ struct HeaderView: View {
                 ) {
                     store.restoreLatestBackup()
                 }
+            }
+            HeaderButton(title: "备份管理", icon: "archivebox") {
+                store.manageBackups()
             }
         }
         .padding(.horizontal, 18)
@@ -928,7 +1002,7 @@ struct ConversionPanel: View {
                         ) {
                             confirmMigration(
                                 title: "删除 \(store.checkedCount) 条会话？",
-                                message: "会先自动备份，再从本机列表和记录中移除。操作前请完全退出 Codex，并确认没有正在运行的任务。",
+                                message: "删除前会自动备份。",
                                 confirmTitle: "删除会话"
                             ) {
                                 store.deleteSelection()
@@ -944,11 +1018,7 @@ struct ConversionPanel: View {
     }
 
     private func migrationWarningText(count: Int) -> String {
-        """
-        将转换 \(count) 条会话，并在操作前自动备份。
-
-        请先完全退出 Codex，并确认没有正在运行的任务。转换完成后重新打开 Codex，列表才会刷新。
-        """
+        "操作前会自动备份。"
     }
 
     private func confirmMigration(title: String, message: String, confirmTitle: String, action: () -> Void) {
@@ -1307,7 +1377,7 @@ struct InspectorPanel: View {
     private func confirmDelete(_ conversation: Conversation) {
         let alert = NSAlert()
         alert.messageText = "删除这条会话？"
-        alert.informativeText = "会先自动备份，再从本机列表和记录中移除。操作前请完全退出 Codex，并确认没有正在运行的任务。"
+        alert.informativeText = "删除前会自动备份。"
         alert.addButton(withTitle: "删除会话")
         alert.addButton(withTitle: "取消")
         alert.alertStyle = .warning

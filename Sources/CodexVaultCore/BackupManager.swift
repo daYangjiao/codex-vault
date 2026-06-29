@@ -2,11 +2,14 @@ import Foundation
 
 public struct BackupManager: Sendable {
     public let backupsRoot: URL
+    /// 自动保留的备份数量上限，超出的旧备份在每次新建备份后清理，避免占用过多磁盘。
+    public let maxBackups: Int
 
-    public init(backupsRoot: URL? = nil) {
+    public init(backupsRoot: URL? = nil, maxBackups: Int = 10) {
         self.backupsRoot = backupsRoot ?? FileManager.default
             .urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("Codex Vault/Backups", isDirectory: true)
+        self.maxBackups = max(1, maxBackups)
     }
 
     public func createBackup(root: URL, reason: String, conversationCount: Int) throws -> BackupRecord {
@@ -30,9 +33,21 @@ public struct BackupManager: Sendable {
                 conversationCount: conversationCount
             )
             try writeManifest(record)
+            pruneOldBackups()
             return record
         } catch {
             throw CodexVaultError.backupFailed(error.localizedDescription)
+        }
+    }
+
+    /// 只保留最近 `maxBackups` 个备份，删除更旧的，避免备份目录无限增长。尽力而为，失败不影响主流程。
+    public func pruneOldBackups() {
+        let backups = listBackups() // 已按时间从新到旧排序
+        guard backups.count > maxBackups else {
+            return
+        }
+        for old in backups.dropFirst(maxBackups) {
+            try? FileManager.default.removeItem(at: old.backupDirectory)
         }
     }
 
@@ -45,6 +60,37 @@ public struct BackupManager: Sendable {
         }
 
         return entries.compactMap(readManifest).sorted { $0.createdAt > $1.createdAt }
+    }
+
+    /// 所有备份占用的总字节数。
+    public func totalSizeBytes() -> Int64 {
+        listBackups().reduce(0) { $0 + directorySize($1.backupDirectory) }
+    }
+
+    /// 人类可读的总大小，如 "12.3 MB"。
+    public func totalSizeText() -> String {
+        ByteCountFormatter.string(fromByteCount: totalSizeBytes(), countStyle: .file)
+    }
+
+    /// 删除全部备份。
+    public func deleteAllBackups() {
+        for backup in listBackups() {
+            try? FileManager.default.removeItem(at: backup.backupDirectory)
+        }
+    }
+
+    private func directorySize(_ url: URL) -> Int64 {
+        guard let enumerator = FileManager.default.enumerator(
+            at: url,
+            includingPropertiesForKeys: [.fileSizeKey]
+        ) else {
+            return 0
+        }
+        var total: Int64 = 0
+        for case let fileURL as URL in enumerator {
+            total += Int64((try? fileURL.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+        }
+        return total
     }
 
     public func restore(_ backup: BackupRecord, to root: URL) throws {
