@@ -197,15 +197,18 @@ public enum MigrationScopeResolver {
         checkedIDs: Set<String>,
         targetProvider: String
     ) -> MigrationScope {
-        let sourceProvider = targetProvider == "openai" ? "custom" : "openai"
+        // 转换到官方(openai)：源是任意「第三方 / API」会话（不限于 "custom"）。
+        // 转换到 API(任意第三方 id)：源是官方会话。
+        let targetIsOfficial = targetProvider == ProviderCategory.officialID
         let candidates = conversations.filter { conversation in
             let checkedMatches = checkedIDs.isEmpty || checkedIDs.contains(conversation.id)
-            return checkedMatches && conversation.effectiveProvider == sourceProvider
+            let providerMatches = targetIsOfficial ? conversation.isApiProvider : conversation.isOfficialProvider
+            return checkedMatches && providerMatches
         }
         return MigrationScope(
             conversationIDs: candidates.map(\.id),
             targetProvider: targetProvider,
-            sourceProvider: sourceProvider,
+            sourceProvider: targetIsOfficial ? "api" : ProviderCategory.officialID,
             usesSelection: !checkedIDs.isEmpty
         )
     }
@@ -236,6 +239,45 @@ public struct DeletionReport: Sendable {
 public extension Conversation {
     var effectiveProvider: String? {
         sessionProvider ?? databaseProvider
+    }
+
+    /// 官方 = Codex 内置的 "openai"。
+    var isOfficialProvider: Bool {
+        effectiveProvider == ProviderCategory.officialID
+    }
+
+    /// API / 第三方 = 任何非空、且不是 "openai" 的 provider（不限于 "custom"）。
+    var isApiProvider: Bool {
+        guard let provider = effectiveProvider, !provider.isEmpty else {
+            return false
+        }
+        return provider != ProviderCategory.officialID
+    }
+}
+
+public enum ProviderCategory {
+    /// Codex 官方 provider 的固定 id。
+    public static let officialID = "openai"
+    /// 探测不到第三方 provider 时的兜底 id（多数 cc-switch 用户即为此值）。
+    public static let fallbackApiID = "custom"
+
+    /// 本机「API / 第三方」provider 的 id。不同用户在 config.toml 里给第三方 provider 起的名字
+    /// 不一定叫 "custom"（可能是 "aigocode_team" 等），所以这里按会话里出现最多的非官方 provider 推断，
+    /// 作为「转换到 API」时要写入的目标 id。`preferred` 可传入当前配置里的 model_provider 优先采用。
+    public static func apiProviderID(conversations: [Conversation], preferred: String? = nil) -> String {
+        if let preferred, !preferred.isEmpty, preferred != officialID {
+            return preferred
+        }
+        var counts: [String: Int] = [:]
+        for conversation in conversations {
+            guard let provider = conversation.effectiveProvider,
+                  !provider.isEmpty,
+                  provider != officialID else {
+                continue
+            }
+            counts[provider, default: 0] += 1
+        }
+        return counts.max(by: { $0.value < $1.value })?.key ?? fallbackApiID
     }
 }
 

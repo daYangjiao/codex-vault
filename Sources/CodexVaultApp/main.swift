@@ -117,9 +117,15 @@ final class VaultStore: ObservableObject {
             return []
         }
         return result.conversations.filter { conversation in
-            let providerMatches = selectedProvider == nil ||
-                conversation.sessionProvider == selectedProvider ||
-                conversation.databaseProvider == selectedProvider
+            let providerMatches: Bool
+            switch selectedProvider {
+            case nil:
+                providerMatches = true
+            case ProviderCategory.officialID:
+                providerMatches = conversation.isOfficialProvider
+            default:
+                providerMatches = conversation.isApiProvider
+            }
             let sourceMatches = selectedSource == nil ||
                 conversation.sourceKind == selectedSource
             let problemMatches = !showProblemsOnly ||
@@ -178,8 +184,8 @@ final class VaultStore: ObservableObject {
         guard !checked.isEmpty else {
             return "默认全部"
         }
-        let api = checked.filter { $0.effectiveProvider == "custom" }.count
-        let official = checked.filter { $0.effectiveProvider == "openai" }.count
+        let api = checked.filter { $0.isApiProvider }.count
+        let official = checked.filter { $0.isOfficialProvider }.count
         if api > 0, official > 0 {
             return "API \(api) / 官方 \(official)"
         }
@@ -195,6 +201,24 @@ final class VaultStore: ObservableObject {
     func providerCount(_ provider: String) -> Int {
         result?.conversations.filter { $0.effectiveProvider == provider }.count ?? 0
     }
+
+    /// API / 第三方会话数（任意非官方 provider）。
+    var apiCount: Int {
+        result?.conversations.filter { $0.isApiProvider }.count ?? 0
+    }
+
+    /// 官方会话数。
+    var officialCount: Int {
+        result?.conversations.filter { $0.isOfficialProvider }.count ?? 0
+    }
+
+    /// 本机「转换到 API」时要写入的第三方 provider id（按现有会话推断，兼容非 "custom" 的命名）。
+    var apiProviderID: String {
+        ProviderCategory.apiProviderID(conversations: result?.conversations ?? [])
+    }
+
+    /// 侧栏「API 会话」筛选用的哨兵值（非 nil、非 "openai" 即触发「按 API 分类」过滤）。
+    static let apiFilterID = "__api__"
 
     func sourceCount(_ sourceKind: String) -> Int {
         result?.conversations.filter { $0.sourceKind == sourceKind }.count ?? 0
@@ -722,19 +746,19 @@ struct FilterPanel: View {
                 FilterRow(
                     title: "API 会话",
                     icon: "network",
-                    count: store.providerCount("custom"),
-                    selected: store.selectedProvider == "custom" && !store.showProblemsOnly
+                    count: store.apiCount,
+                    selected: store.selectedProvider == VaultStore.apiFilterID && !store.showProblemsOnly
                 ) {
-                    store.setFilter(provider: "custom")
+                    store.setFilter(provider: VaultStore.apiFilterID)
                 }
 
                 FilterRow(
                     title: "官方会话",
                     icon: "checkmark.seal",
-                    count: store.providerCount("openai"),
-                    selected: store.selectedProvider == "openai" && !store.showProblemsOnly
+                    count: store.officialCount,
+                    selected: store.selectedProvider == ProviderCategory.officialID && !store.showProblemsOnly
                 ) {
-                    store.setFilter(provider: "openai")
+                    store.setFilter(provider: ProviderCategory.officialID)
                 }
 
                 FilterRow(
@@ -831,11 +855,11 @@ struct ConversionPanel: View {
     @ObservedObject var store: VaultStore
 
     var apiScope: MigrationScope {
-        store.migrationScope(to: "openai")
+        store.migrationScope(to: ProviderCategory.officialID)
     }
 
     var officialScope: MigrationScope {
-        store.migrationScope(to: "custom")
+        store.migrationScope(to: store.apiProviderID)
     }
 
     var body: some View {
@@ -874,7 +898,7 @@ struct ConversionPanel: View {
                         message: migrationWarningText(count: apiScope.conversationIDs.count),
                         confirmTitle: "转换到官方"
                     ) {
-                        store.migrateSelection(to: "openai")
+                        store.migrateSelection(to: ProviderCategory.officialID)
                     }
                 }
 
@@ -890,7 +914,7 @@ struct ConversionPanel: View {
                         message: migrationWarningText(count: officialScope.conversationIDs.count),
                         confirmTitle: "转换到 API"
                     ) {
-                        store.migrateSelection(to: "custom")
+                        store.migrateSelection(to: store.apiProviderID)
                     }
                 }
 
@@ -1063,8 +1087,8 @@ struct ListHeaderView: View {
                 .clipShape(RoundedRectangle(cornerRadius: 8))
 
                 MetricView(title: "总数", value: "\(store.totalCount)")
-                MetricView(title: "API", value: "\(store.providerCount("custom"))")
-                MetricView(title: "官方", value: "\(store.providerCount("openai"))")
+                MetricView(title: "API", value: "\(store.apiCount)")
+                MetricView(title: "官方", value: "\(store.officialCount)")
                 MetricView(title: "异常", value: "\(store.problemCount)")
 
                 Divider()
@@ -1350,26 +1374,22 @@ struct ProviderPill: View {
             .clipShape(Capsule())
     }
 
+    private var isOfficial: Bool { provider == ProviderCategory.officialID }
+    private var isApi: Bool {
+        guard let provider, !provider.isEmpty else { return false }
+        return provider != ProviderCategory.officialID
+    }
+
     private var background: Color {
-        switch provider {
-        case "openai":
-            return .black.opacity(0.08)
-        case "custom":
-            return .blue.opacity(0.12)
-        default:
-            return .gray.opacity(0.15)
-        }
+        if isOfficial { return .black.opacity(0.08) }
+        if isApi { return .blue.opacity(0.12) }
+        return .gray.opacity(0.15)
     }
 
     private var foreground: Color {
-        switch provider {
-        case "openai":
-            return .primary
-        case "custom":
-            return .blue
-        default:
-            return .secondary
-        }
+        if isOfficial { return .primary }
+        if isApi { return .blue }
+        return .secondary
     }
 }
 
@@ -1432,13 +1452,11 @@ struct StatusBadge: View {
 enum ProviderText {
     static func name(_ provider: String?) -> String {
         switch provider {
-        case "openai":
+        case ProviderCategory.officialID:
             return "官方"
-        case "custom":
+        case .some(let provider) where !provider.isEmpty:
             return "API"
-        case .some(let provider):
-            return provider
-        case .none:
+        default:
             return "未知"
         }
     }

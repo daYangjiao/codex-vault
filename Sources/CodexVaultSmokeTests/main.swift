@@ -144,7 +144,7 @@ struct CodexVaultSmokeTests {
             targetProvider: "openai"
         )
         try expect(scope.usesSelection == false, "empty checked set should use all matching conversations")
-        try expect(scope.sourceProvider == "custom", "openai target should migrate from custom")
+        try expect(scope.sourceProvider == "api", "openai target should migrate from the API (third-party) category")
         try expect(Set(scope.conversationIDs) == Set([
             "22222222-2222-4222-8222-222222222222",
             "44444444-4444-4444-8444-444444444444"
