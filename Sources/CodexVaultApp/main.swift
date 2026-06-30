@@ -3,6 +3,7 @@ import CodexVaultCore
 import SwiftUI
 
 @main
+@MainActor
 struct CodexVaultApplication {
     static func main() {
         let app = NSApplication.shared
@@ -13,6 +14,7 @@ struct CodexVaultApplication {
     }
 }
 
+@MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var window: NSWindow?
 

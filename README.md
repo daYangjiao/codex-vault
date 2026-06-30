@@ -30,7 +30,7 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 
 ## 安装（一行终端命令）
 
-> 需要 macOS 14 及以上，以及 Xcode 命令行工具（没有的话脚本会提示你运行 `xcode-select --install`）。
+> 需要 macOS 14 及以上。不需要安装 Xcode 或 Xcode 命令行工具。
 
 打开「终端」，粘贴运行这一行：
 
@@ -38,12 +38,14 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-它会下载源码、自动构建并安装「Codex 对话管家」，装好后自动打开（安装到 `/Applications/Codex 对话管家.app`）。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。首次构建约需 1-2 分钟。
+它会下载预编译好的「Codex 对话管家」，安装到 `/Applications/Codex 对话管家.app`，并自动打开。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。
 
-本地构建的程序不带「隔离」标记，装完可以直接打开，不会被 Gatekeeper 拦。
+安装脚本只使用 macOS 自带工具（`curl`、`ditto`、`open`），适合交给 AI 代理在任意符合系统要求的 Mac 上自动安装。
 
 <details>
 <summary>开发者：本地运行 / 调试</summary>
+
+需要 Xcode 命令行工具（`xcode-select --install`）：
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
@@ -51,7 +53,21 @@ cd codex-vault
 
 swift run CodexVaultSmokeTests          # 自检：验证扫描与迁移核心逻辑
 swift run CodexVault                     # 前台运行一个开发版（不安装到「应用程序」）
+./scripts/package-macos.sh              # 生成 dist/Codex-Vault.app.zip 和 dist/Codex-Vault.dmg
 ```
+
+</details>
+
+<details>
+<summary>发布者：生成一键安装包</summary>
+
+发布新版本时，在 macOS 上运行：
+
+```bash
+./scripts/package-macos.sh
+```
+
+然后把 `dist/Codex-Vault.app.zip` 上传到 GitHub 最新 Release。README 里的安装命令会下载这个 Release asset 并安装；如果没有上传这个文件，一键安装会提示下载失败。
 
 </details>
 
@@ -131,7 +147,7 @@ Codex Desktop groups your history by model source: switch to an API provider and
 
 ## Install (one Terminal command)
 
-> Requires macOS 14+ and the Xcode Command Line Tools (the script prompts you to run `xcode-select --install` if missing).
+> Requires macOS 14+. Xcode and the Xcode Command Line Tools are not required.
 
 Open Terminal and paste this single line:
 
@@ -139,12 +155,14 @@ Open Terminal and paste this single line:
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-It clones the source, builds, and installs **Codex 对话管家**, then opens it automatically (installed to `/Applications/Codex 对话管家.app`). After that, open it any time from **Launchpad / Applications** — no command needed again. The first build takes 1–2 minutes.
+It downloads the prebuilt **Codex 对话管家**, installs it to `/Applications/Codex 对话管家.app`, and opens it automatically. After that, open it any time from **Launchpad / Applications** — no command needed again.
 
-Locally built binaries carry no quarantine flag, so the app opens cleanly — Gatekeeper won't block it.
+The installer only uses macOS built-in tools (`curl`, `ditto`, `open`), so it is suitable for AI agents to install automatically on any Mac that meets the system requirement.
 
 <details>
 <summary>Developers: run / debug locally</summary>
+
+Requires the Xcode Command Line Tools (`xcode-select --install`):
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
@@ -152,7 +170,21 @@ cd codex-vault
 
 swift run CodexVaultSmokeTests          # self-check: scanning + migration core logic
 swift run CodexVault                     # runs a dev build in the foreground (does NOT install to /Applications)
+./scripts/package-macos.sh              # creates dist/Codex-Vault.app.zip and dist/Codex-Vault.dmg
 ```
+
+</details>
+
+<details>
+<summary>Publishers: create the one-line installer asset</summary>
+
+When publishing a new version, run this on macOS:
+
+```bash
+./scripts/package-macos.sh
+```
+
+Then upload `dist/Codex-Vault.app.zip` to the latest GitHub Release. The README install command downloads and installs that Release asset; if the asset is missing, the one-line installer reports a download failure.
 
 </details>
 

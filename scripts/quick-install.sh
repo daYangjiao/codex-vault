@@ -3,14 +3,13 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 #
-# 从源码构建并安装到「应用程序」，装完自动打开。
-# 本地构建的程序没有 quarantine 隔离标记，可直接打开，无需 Apple 签名 / 公证。
-# Builds from source, installs into /Applications, and launches it. Locally built
-# binaries carry no quarantine flag, so the app opens cleanly — no Apple signing needed.
+# 下载预编译 .app 压缩包并安装到「应用程序」，装完自动打开。
+# Download the prebuilt .app zip, install into /Applications, and launch it.
 set -euo pipefail
 
-REPO_URL="https://github.com/daYangjiao/codex-vault.git"
+REPO="daYangjiao/codex-vault"
 APP_NAME="Codex 对话管家"
+ASSET_URL="${CODEX_VAULT_ASSET_URL:-https://github.com/$REPO/releases/latest/download/Codex-Vault.app.zip}"
 TARGET="/Applications/$APP_NAME.app"
 
 if [[ "$(uname)" != "Darwin" ]]; then
@@ -18,34 +17,28 @@ if [[ "$(uname)" != "Darwin" ]]; then
   exit 1
 fi
 
-# 需要 Swift 工具链（Xcode 命令行工具）
-if ! command -v swift >/dev/null 2>&1; then
-  echo "需要先安装 Xcode 命令行工具 / Xcode Command Line Tools required." >&2
-  echo "请运行 / run:  xcode-select --install" >&2
-  echo "装好后再重新执行本命令 / then re-run this command." >&2
-  exit 1
-fi
-
 WORK_DIR="$(mktemp -d)"
 cleanup() { rm -rf "$WORK_DIR"; }
 trap cleanup EXIT
 
-echo "下载源码 / Cloning…"
-git clone --depth 1 "$REPO_URL" "$WORK_DIR/src" >/dev/null 2>&1
-cd "$WORK_DIR/src"
+echo "下载安装包 / Downloading…"
+if ! curl -fL --progress-bar "$ASSET_URL" -o "$WORK_DIR/app.zip"; then
+  echo "下载失败：请确认 GitHub 最新 Release 已上传 Codex-Vault.app.zip。" >&2
+  echo "Download failed: make sure the latest GitHub Release includes Codex-Vault.app.zip." >&2
+  exit 1
+fi
 
-echo "构建中（首次约需 1-2 分钟）/ Building (1-2 min on first run)…"
-./scripts/package-macos.sh >/dev/null
-
-BUILT_APP="dist/$APP_NAME.app"
-if [[ ! -d "$BUILT_APP" ]]; then
-  echo "构建失败：未生成应用 / build failed: app not produced." >&2
+echo "解压 / Extracting…"
+ditto -x -k "$WORK_DIR/app.zip" "$WORK_DIR/out"
+APP_SRC="$WORK_DIR/out/$APP_NAME.app"
+if [[ ! -d "$APP_SRC" ]]; then
+  echo "压缩包中未找到 $APP_NAME.app / app not found in archive." >&2
   exit 1
 fi
 
 echo "安装到「应用程序」/ Installing into /Applications…"
 [[ -d "$TARGET" ]] && rm -rf "$TARGET"
-ditto --noextattr --noqtn "$BUILT_APP" "$TARGET"
+ditto --noextattr --noqtn "$APP_SRC" "$TARGET"
 xattr -cr "$TARGET" 2>/dev/null || true
 
 echo "完成，正在打开 / Done, launching…"

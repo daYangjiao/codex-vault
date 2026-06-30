@@ -15,6 +15,8 @@ UNIVERSAL_BIN="$WORK_DIR/CodexVault-universal"
 ICON_FILE="$ROOT_DIR/Assets/AppIcon/CodexVault.icns"
 DMG_PATH="$DIST_DIR/Codex-Vault.dmg"
 TEMP_DMG_PATH="$WORK_DIR/Codex-Vault.dmg"
+ZIP_PATH="$DIST_DIR/Codex-Vault.app.zip"
+TEMP_ZIP_PATH="$WORK_DIR/Codex-Vault.app.zip"
 
 cleanup() {
   rm -rf "$WORK_DIR"
@@ -39,7 +41,7 @@ else
 fi
 echo "binary archs: $(lipo -archs "$UNIVERSAL_BIN")"
 
-rm -rf "$APP_BUNDLE" "$DMG_PATH"
+rm -rf "$APP_BUNDLE" "$DMG_PATH" "$ZIP_PATH"
 mkdir -p "$MACOS_DIR" "$RESOURCES_DIR"
 
 cp "$UNIVERSAL_BIN" "$MACOS_DIR/CodexVault"
@@ -119,8 +121,12 @@ if command -v xattr >/dev/null 2>&1; then
 fi
 
 ditto --noextattr --noqtn "$BUILD_APP_BUNDLE" "$APP_BUNDLE"
+ditto -c -k --keepParent "$BUILD_APP_BUNDLE" "$TEMP_ZIP_PATH"
 cp "$TEMP_DMG_PATH" "$DMG_PATH"
+cp "$TEMP_ZIP_PATH" "$ZIP_PATH"
 shasum -a 256 "$DMG_PATH" > "$DIST_DIR/Codex-Vault.dmg.sha256"
+shasum -a 256 "$ZIP_PATH" > "$DIST_DIR/Codex-Vault.app.zip.sha256"
 
 echo "$APP_BUNDLE"
+echo "$ZIP_PATH"
 echo "$DMG_PATH"
