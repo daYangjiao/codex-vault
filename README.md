@@ -30,7 +30,7 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 
 ## 安装（一行终端命令）
 
-> 需要 macOS 14 及以上。
+> 需要 macOS 14 及以上，以及 Xcode 命令行工具（没有的话脚本会提示你运行 `xcode-select --install`）。
 
 打开「终端」，粘贴运行这一行：
 
@@ -38,40 +38,19 @@ Codex 桌面端会按「模型来源」把历史会话分桶显示——切到 A
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-它会自动下载并安装「Codex 对话管家」，装好后会自动打开（安装到 `/Applications/Codex 对话管家.app`）。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。
+它会下载源码、自动构建并安装「Codex 对话管家」，装好后自动打开（安装到 `/Applications/Codex 对话管家.app`）。之后随时在**启动台 / 应用程序**里点开即可，不用再敲命令。首次构建约需 1-2 分钟。
 
-> **由 AI / 自动化代理安装？** 只需运行上面这一条 `curl` 命令即可完成安装，**不要**克隆仓库、**不要**从源码构建、**不要**运行 `swift run`。装好的应用名为 `Codex 对话管家.app`。
-
-<details>
-<summary>不想用管道命令？手动安装（仍是预编译，无需编译）</summary>
-
-逐条运行下面命令，效果和上面那行一致（下载预编译好的应用并装入「应用程序」）：
-
-```bash
-curl -fL https://github.com/daYangjiao/codex-vault/releases/latest/download/Codex-Vault.app.zip -o /tmp/codex-vault.zip
-rm -rf /tmp/codex-vault-app && ditto -x -k /tmp/codex-vault.zip /tmp/codex-vault-app
-rm -rf "/Applications/Codex 对话管家.app"
-ditto --noextattr --noqtn "/tmp/codex-vault-app/Codex 对话管家.app" "/Applications/Codex 对话管家.app"
-open "/Applications/Codex 对话管家.app"
-```
-
-</details>
+本地构建的程序不带「隔离」标记，装完可以直接打开，不会被 Gatekeeper 拦。
 
 <details>
-<summary>仅开发者：从源码构建（普通安装无需此步）</summary>
-
-仅当你要改代码或调试时才需要。需要 Xcode 命令行工具（`xcode-select --install`）：
+<summary>开发者：本地运行 / 调试</summary>
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
 cd codex-vault
 
 swift run CodexVaultSmokeTests          # 自检：验证扫描与迁移核心逻辑
-swift run CodexVault                     # 前台运行一个开发版（不会安装到「应用程序」）
-
-# 或打包并安装到「应用程序」
-./scripts/package-macos.sh
-./scripts/install-macos.sh
+swift run CodexVault                     # 前台运行一个开发版（不安装到「应用程序」）
 ```
 
 </details>
@@ -152,7 +131,7 @@ Codex Desktop groups your history by model source: switch to an API provider and
 
 ## Install (one Terminal command)
 
-> Requires macOS 14+.
+> Requires macOS 14+ and the Xcode Command Line Tools (the script prompts you to run `xcode-select --install` if missing).
 
 Open Terminal and paste this single line:
 
@@ -160,29 +139,12 @@ Open Terminal and paste this single line:
 curl -fsSL https://raw.githubusercontent.com/daYangjiao/codex-vault/main/scripts/quick-install.sh | bash
 ```
 
-It downloads and installs **Codex 对话管家**, then opens it automatically (installed to `/Applications/Codex 对话管家.app`). After that, open it any time from **Launchpad / Applications** — no command needed again.
+It clones the source, builds, and installs **Codex 对话管家**, then opens it automatically (installed to `/Applications/Codex 对话管家.app`). After that, open it any time from **Launchpad / Applications** — no command needed again. The first build takes 1–2 minutes.
 
-> **Installing via an AI / automated agent?** Just run the single `curl` command above. **Do not** clone the repo, **do not** build from source, **do not** run `swift run`. The installed app is named `Codex 对话管家.app`.
-
-<details>
-<summary>Prefer not to pipe into bash? Manual install (still prebuilt, no compiling)</summary>
-
-Run these line by line — same result as the one-liner (downloads the prebuilt app and installs it into /Applications):
-
-```bash
-curl -fL https://github.com/daYangjiao/codex-vault/releases/latest/download/Codex-Vault.app.zip -o /tmp/codex-vault.zip
-rm -rf /tmp/codex-vault-app && ditto -x -k /tmp/codex-vault.zip /tmp/codex-vault-app
-rm -rf "/Applications/Codex 对话管家.app"
-ditto --noextattr --noqtn "/tmp/codex-vault-app/Codex 对话管家.app" "/Applications/Codex 对话管家.app"
-open "/Applications/Codex 对话管家.app"
-```
-
-</details>
+Locally built binaries carry no quarantine flag, so the app opens cleanly — Gatekeeper won't block it.
 
 <details>
-<summary>Developers only: build from source (not needed for normal install)</summary>
-
-Only needed if you want to modify or debug the code. Requires the Xcode Command Line Tools (`xcode-select --install`):
+<summary>Developers: run / debug locally</summary>
 
 ```bash
 git clone https://github.com/daYangjiao/codex-vault.git
@@ -190,10 +152,6 @@ cd codex-vault
 
 swift run CodexVaultSmokeTests          # self-check: scanning + migration core logic
 swift run CodexVault                     # runs a dev build in the foreground (does NOT install to /Applications)
-
-# or package and install into /Applications
-./scripts/package-macos.sh
-./scripts/install-macos.sh
 ```
 
 </details>
